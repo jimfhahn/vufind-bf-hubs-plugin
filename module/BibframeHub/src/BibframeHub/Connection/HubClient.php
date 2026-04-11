@@ -109,9 +109,13 @@ class HubClient implements LoggerAwareInterface
             if ($status === 302) {
                 $hubUri = $response->getHeaders()->get('Location')->getFieldValue();
                 $token = basename($hubUri);
-                // Search suggest2 using the original label to get full details
+                // Search suggest2 using the original label to get full details,
+                // but always preserve the URI from the redirect (suggest2's
+                // first hit may be a different hub with the same keywords).
                 $details = $this->searchSuggest2($label, 'keyword', 1);
                 if (!empty($details)) {
+                    $details[0]['uri'] = $hubUri;
+                    $details[0]['token'] = $token;
                     return $details[0];
                 }
                 // Fallback: return minimal info from redirect
@@ -242,6 +246,26 @@ class HubClient implements LoggerAwareInterface
             'strategy' => $strategy,
             'verified' => $verified,
         ];
+    }
+
+    /**
+     * Given an AAP label from suggest2, derive the canonical base work hub URI.
+     *
+     * Strips known qualifiers (language, form, parenthetical) from the AAP
+     * and looks up the base label via the label endpoint.
+     * E.g. "Fitzgerald, ... Great Gatsby (collected works edition)" → "Fitzgerald, ... Great Gatsby"
+     *
+     * @return string|null Hub URI if the base work exists, null otherwise
+     */
+    public function resolveBaseWorkUri(string $aapLabel): ?string
+    {
+        $baseLabel = $this->extractBaseLabel($aapLabel);
+        if ($baseLabel === $aapLabel) {
+            return null; // Already a base label — no stripping happened
+        }
+
+        $result = $this->lookupByLabel($baseLabel);
+        return $result['uri'] ?? null;
     }
 
     protected function logError(string $message): void

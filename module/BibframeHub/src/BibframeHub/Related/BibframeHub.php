@@ -89,10 +89,26 @@ class BibframeHub implements RelatedInterface
 
         // If RDF failed, try suggest2 for a current URI
         if (empty($scored)) {
-            $currentUri = $this->resolveCurrentUri($marcFields);
+            $suggest2Hit = $this->resolveCurrentUriWithLabel($marcFields);
+            $currentUri = $suggest2Hit['uri'] ?? null;
             if ($currentUri && $currentUri !== $this->hubUri) {
                 $this->hubUri = $currentUri;
                 $scored = $this->fetchAndScoreViaRdf($this->hubUri);
+            }
+
+            // If suggest2's hub had no relationships, it may be a qualified
+            // edition (e.g. collected works). Derive the base work AAP and
+            // try the label endpoint for the canonical work hub.
+            if (empty($scored) && !empty($suggest2Hit['aLabel'])) {
+                $baseWorkUri = $this->hubClient
+                    ->resolveBaseWorkUri($suggest2Hit['aLabel']);
+                if ($baseWorkUri
+                    && $baseWorkUri !== $this->hubUri
+                    && $baseWorkUri !== $originalUri
+                ) {
+                    $this->hubUri = $baseWorkUri;
+                    $scored = $this->fetchAndScoreViaRdf($this->hubUri);
+                }
             }
         }
 
@@ -293,21 +309,36 @@ class BibframeHub implements RelatedInterface
      */
     protected function resolveCurrentUri(array $marcFields): ?string
     {
+        return $this->resolveCurrentUriWithLabel($marcFields)['uri'] ?? null;
+    }
+
+    /**
+     * Resolve a current Hub URI via suggest2, returning both the URI
+     * and the AAP label (needed for base-work derivation when the
+     * first hit turns out to be a qualified edition with no relationships).
+     *
+     * @return array{uri?: string, aLabel?: string}
+     */
+    protected function resolveCurrentUriWithLabel(array $marcFields): array
+    {
         $searchTitle = $marcFields['uniformTitle'] ?? $marcFields['title'] ?? null;
         if (!$searchTitle) {
-            return null;
+            return [];
         }
 
         try {
             $lookup = $this->hubClient->findHubsForRecord($marcFields);
             if (!empty($lookup['hits'][0]['uri'])) {
-                return $lookup['hits'][0]['uri'];
+                return [
+                    'uri' => $lookup['hits'][0]['uri'],
+                    'aLabel' => $lookup['hits'][0]['aLabel'] ?? null,
+                ];
             }
         } catch (\Exception $e) {
             // LC API may be down — that's fine
         }
 
-        return null;
+        return [];
     }
 
     /**
