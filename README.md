@@ -2,51 +2,183 @@
 
 A VuFind plugin that surfaces **surprising, non-obvious work relationships** using Library of Congress BIBFRAME Hubs. Instead of showing the predictable (translations, series membership), the plugin prioritizes creative transformations, cross-medium adaptations, and unexpected connections between works.
 
+## Quick Start (Docker)
+
+The fastest way to see the plugin in action. Requires Docker and a running Neo4j instance with the BIBFRAME Hubs dataset (see [Neo4j Setup](#neo4j-setup) below).
+
+```bash
+git clone https://github.com/jimfhahn/vufind-bf-hubs-plugin.git
+cd vufind-bf-hubs-plugin
+docker compose up --build
+```
+
+VuFind will be available at **http://localhost:4567/vufind/**. Three test records are loaded automatically:
+- [Pride and Prejudice](http://localhost:4567/vufind/Record/test-pandp-001) — 5 relationship groups
+- [Hamlet](http://localhost:4567/vufind/Record/test-hamlet-001) — 2 relationship groups
+- [The Great Gatsby](http://localhost:4567/vufind/Record/test-gatsby-001) — 4 relationship groups
+
+The Docker setup includes VuFind (PHP 8.3 + Apache), MariaDB, and embedded Solr. Neo4j runs on the host and is accessed via `host.docker.internal`.
+
+## Installing into an Existing VuFind
+
+### Prerequisites
+
+- VuFind 10.x or 11.x
+- Neo4j 5.x with the [n10s](https://neo4j.com/labs/neosemantics/) plugin and the BIBFRAME Hubs dataset loaded (see [Neo4j Setup](#neo4j-setup))
+- PHP 8.1+
+
+### 1. Clone the plugin
+
+```bash
+cd /path/to/your/
+git clone https://github.com/jimfhahn/vufind-bf-hubs-plugin.git
+```
+
+### 2. Symlink into VuFind
+
+```bash
+ln -s /path/to/your/vufind-bf-hubs-plugin/module/BibframeHub /path/to/vufind/module/BibframeHub
+ln -s /path/to/your/vufind-bf-hubs-plugin/themes/bibframehub /path/to/vufind/themes/bibframehub
+```
+
+### 3. Register the autoloader
+
+Add to your VuFind's `composer.local.json` (create it if it doesn't exist):
+
+```json
+{
+    "autoload": {
+        "psr-4": {
+            "BibframeHub\\": "module/BibframeHub/src/BibframeHub/"
+        },
+        "classmap": [
+            "module/BibframeHub/Module.php"
+        ]
+    }
+}
+```
+
+Then regenerate the autoloader:
+
+```bash
+cd /path/to/vufind
+composer dump-autoload
+```
+
+### 4. Copy the plugin config
+
+```bash
+cp /path/to/your/vufind-bf-hubs-plugin/config/BibframeHub.ini /path/to/vufind/local/config/vufind/BibframeHub.ini
+```
+
+Edit `BibframeHub.ini` and set your Neo4j connection details:
+
+```ini
+[Neo4j]
+enabled = true
+uri = "bolt://localhost:7687"
+username = "neo4j"
+password = "your_neo4j_password"
+database = "neo4j"
+```
+
+### 5. Activate the module and theme
+
+Set the environment variable when starting VuFind:
+
+```bash
+export VUFIND_LOCAL_MODULES=BibframeHub
+```
+
+In your VuFind `local/config/vufind/config.ini`, set the theme and activate the related plugin:
+
+```ini
+[Site]
+theme = bibframehub
+
+[Record]
+related[] = BibframeHub
+```
+
+> **Note:** The `bibframehub` theme extends `bootstrap5`. If you use a custom theme, you can either extend `bibframehub` instead, or copy `themes/bibframehub/templates/Related/BibframeHub.phtml` into your theme's `templates/Related/` directory and use your existing theme name.
+
+### 6. Start VuFind
+
+```bash
+# If using the built-in PHP server:
+VUFIND_HOME=/path/to/vufind VUFIND_LOCAL_DIR=/path/to/vufind/local \
+  VUFIND_LOCAL_MODULES=BibframeHub php -S localhost:8080 -t public/
+
+# Or with Apache, set VUFIND_LOCAL_MODULES in your Apache config or .env
+```
+
+The "Related Works" panel will appear in the sidebar of any record page where a matching BIBFRAME Hub is found.
+
+## Neo4j Setup
+
+The plugin requires a Neo4j graph database loaded with the LC BIBFRAME Hubs dataset.
+
+### 1. Start Neo4j with n10s
+
+```bash
+docker run -d --name neo4j-hubs \
+  -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/your_password \
+  -e NEO4J_PLUGINS='["n10s"]' \
+  -v $(pwd)/data:/import \
+  neo4j:5.26
+```
+
+### 2. Download the BIBFRAME Hubs dataset
+
+```bash
+mkdir -p data
+curl -L -o data/hubs.bibframe.ttl.gz \
+  "https://id.loc.gov/download/resources/hubs.bibframe.ttl.gz"
+gunzip data/hubs.bibframe.ttl.gz
+```
+
+This is ~570MB compressed, ~4.3GB decompressed.
+
+### 3. Configure n10s and import
+
+Open the Neo4j browser at http://localhost:7474 and run:
+
+```cypher
+CALL n10s.graphconfig.init({handleVocabUris: "SHORTEN"});
+CREATE CONSTRAINT n10s_unique_uri FOR (r:Resource) REQUIRE r.uri IS UNIQUE;
+```
+
+Import the dataset (~20 minutes):
+
+```cypher
+CALL n10s.rdf.import.fetch("file:///import/hubs.bibframe.ttl", "Turtle", {commitSize: 25000});
+```
+
+### 4. Create indexes
+
+```cypher
+CREATE INDEX hub_uri FOR (h:ns0__Hub) ON (h.uri);
+CREATE FULLTEXT INDEX hub_title_ft FOR (t:ns0__Title) ON EACH [t.ns0__mainTitle];
+```
+
+The loaded graph contains **2.39M Hub nodes**, 28.8M total nodes, and 117.5M triples.
+
 ## Design Principle
 
-> "Prioritize things that are interesting or non-obvious to the user — something surprising should be the key metric."
+> Surface surprising, non-obvious connections rather than predictable ones like translations or series membership.
 
 A patron viewing *Pride and Prejudice* should see *Death Comes to Pemberley* (P.D. James derivative), the 2005 Keira Knightley film, *Pride and Prejudice and Zombies* (parody), and *Bride & Prejudice* (Bollywood adaptation) — rather than drowning in 30+ translations and a series container.
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────┐
-│  VuFind Record View                             │
-│  ┌───────────────────────────────────────────┐  │
-│  │ Related: BibframeHub (sidebar panel)      │  │
-│  │  → "Death Comes to Pemberley" [derivative]│  │
-│  │  → "P&P (Film, 2005)" [adaptation]       │  │
-│  │  → "P&P and Zombies" [parody]            │  │
-│  └───────────────────────────────────────────┘  │
-└────────────┬────────────────────────────────────┘
-             │ init($settings, $driver)
-             ▼
-┌────────────────────────────┐
-│ Related\BibframeHub        │ VuFind Related plugin
-│  → extracts MARC fields    │
-│  → resolves Hub URI        │
-│  → queries graph           │
-│  → scores by surprise      │
-│  → returns top N           │
-└────────────┬───────────────┘
-             │
-     ┌───────┴────────┐
-     ▼                ▼
-┌──────────┐  ┌──────────────┐
-│ HubClient│  │ Neo4jService │  ← primary data source
-│ (LC API) │  │ (graph DB)   │
-│ suggest2 │  │ 2.6M Hubs    │
-│ fallback │  │ 117M triples │
-└──────────┘  └──────────────┘
-```
+## How It Works
 
 ### Data Flow
 
-1. **MARC → Hub URI**: Match a VuFind MARC record to a BIBFRAME Hub in Neo4j via LCCN, title+contributor, or LC suggest2 API fallback.
-2. **Graph traversal**: Query all Hub-to-Hub relationships (direct edges + typed `bflc:relationship` links).
-3. **Surprise scoring**: Score each related Hub on a 0–100 scale using four signals.
-4. **Present top N**: Return the highest-scoring connections to the template.
+1. **MARC → Hub URI**: Extract title/author/LCCN from the MARC record → match to a BIBFRAME Hub via Neo4j title search or LCCN lookup.
+2. **RDF-first**: Fetch live RDF/XML from `id.loc.gov/{hubUri}.rdf` → parse typed relationships.
+3. **Neo4j fallback**: If RDF is unavailable, query the graph for all Hub-to-Hub relationships (direct edges + typed `bflc:relationship` links).
+4. **Surprise scoring**: Score each related Hub on a 0–100 scale using four signals.
+5. **Display**: Render grouped results in a collapsible tree in the record sidebar.
 
 ## Surprise Scoring Model
 
@@ -238,68 +370,56 @@ Used as fallback when a Hub can't be found in Neo4j (e.g., newly cataloged works
 ## Project Structure
 
 ```
-vufind-plugin/
-├── README.md                          ← this file
-├── composer.json                      ← PSR-4 autoloading
+vufind-bf-hubs-plugin/
 ├── config/
-│   └── BibframeHub.ini               ← plugin configuration
+│   └── BibframeHub.ini               ← plugin configuration (copy to VuFind local/)
 ├── module/BibframeHub/
 │   ├── Module.php                     ← Laminas module bootstrap
 │   ├── config/module.config.php       ← service/plugin registration
 │   └── src/BibframeHub/
 │       ├── Connection/
-│       │   ├── HubClient.php          ← LC suggest2 API client
+│       │   ├── HubClient.php          ← LC suggest2 API client (fallback)
 │       │   └── HubClientFactory.php
 │       ├── Graph/
-│       │   ├── Neo4jService.php       ← Neo4j HTTP API client (needs rework)
+│       │   ├── HubRdfParser.php       ← id.loc.gov RDF/XML fetcher + parser
+│       │   ├── Neo4jService.php       ← Neo4j HTTP API client (graph queries)
 │       │   └── Neo4jServiceFactory.php
 │       ├── Related/
-│       │   ├── BibframeHub.php        ← VuFind Related plugin entry point
+│       │   ├── BibframeHub.php        ← VuFind Related plugin (orchestrator)
 │       │   └── BibframeHubFactory.php
 │       └── Relationship/
-│           └── RelationshipInferrer.php ← AAP string parsing (obsoleted by graph)
+│           └── RelationshipInferrer.php ← 5-tier surprise scoring engine
 ├── themes/bibframehub/
 │   ├── templates/Related/BibframeHub.phtml  ← sidebar panel template
 │   └── theme.config.php
-├── tests/
-│   ├── bootstrap.php                  ← standalone test shims
-│   ├── test_poc.php                   ← API-based test script
-│   └── test_surprise_scoring.py       ← surprise model prototype
-└── data/
-    ├── hubs.bibframe.ttl.gz           ← 570MB compressed bulk download
-    └── hubs.bibframe.ttl              ← 4.3GB decompressed (105M lines)
+├── docker-compose.yml                 ← Docker dev environment
+├── docker/                            ← Dockerfile + entrypoint + config overrides
+└── tests/                             ← scoring tests
 ```
 
-## Current Status
+## Configuration Reference
 
-### Done
-- Full BIBFRAME Hubs dataset imported into Neo4j (2.6M Hubs, 117.5M triples)
-- Graph structure explored and documented
-- Surprise scoring model designed and prototyped in Python
-- Validated scoring against P&P (61 connections, all interesting ones scored 74–100, translations scored 15–23)
-- VuFind plugin module structure complete (first iteration)
+`BibframeHub.ini`:
 
-### Needs Rework
-- **Neo4jService.php**: Currently a simple cache. Must become the primary query engine using the graph's native schema (`ns0__Hub`, `ns1__Relationship`, etc.) and surprise scoring.
-- **RelationshipInferrer.php**: AAP string parsing approach is obsoleted by the graph's explicit typed relationships. Replace with graph-based classification + surprise scoring.
-- **BibframeHub.php** (Related plugin): Rewire to use Neo4j-first flow with LC API as fallback.
-- **Hub URI resolution**: Need robust MARC → Hub URI matching via LCCN lookup, title+contributor matching in graph, or suggest2 API fallback.
-
-### Not Started
-- Port Python surprise scoring model to PHP
-- Build Neo4j Cypher queries for surprise-scored results
-- Integration testing with live VuFind
-- Multi-hop traversal (2-hop connections like P&P → Zombies → Abraham Lincoln Vampire Hunter)
-
-## VuFind Integration
-
-Activate the module:
-```bash
-export VUFIND_LOCAL_MODULES=BibframeHub
-```
-
-In VuFind's `config.ini`:
 ```ini
-[Record]
-related[] = BibframeHub
+[Connection]
+baseUrl = "https://id.loc.gov"     ; LC Linked Data Service
+userAgent = "VuFind-BibframeHub/1.0"
+timeout = 10
+
+[Neo4j]
+enabled = true                      ; Set to false to disable graph queries
+uri = "bolt://localhost:7687"       ; Neo4j connection (HTTP 7474 or Bolt 7687)
+username = "neo4j"
+password = "your_password"
+database = "neo4j"
+
+[Display]
+validateUris = true                 ; HEAD-check URIs before displaying links
+validationCacheTtl = 86400          ; Cache validation results for 24 hours
+maxDisplayResults = 15              ; Max related works to show
 ```
+
+## License
+
+This project is open source. BIBFRAME Hub data is from the Library of Congress Linked Data Service.
