@@ -71,7 +71,6 @@ Score = base_tier + rarity_bonus + author_distance + medium_crossing (0–100 sc
 
 ### LC suggest2 API (Hub Resolution)
 - URL: `https://id.loc.gov/resources/hubs/suggest2?q=...&searchtype=keyword&count=20`.
-- Intermittently available (503s common).
 - Label endpoint: `https://id.loc.gov/resources/hubs/label/{encoded_AAP}` → 302 redirect to Hub URI.
 
 ## Source Files

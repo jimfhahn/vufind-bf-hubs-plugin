@@ -377,8 +377,6 @@ RETURN DISTINCT a.uri
 
 **Base URL**: `https://id.loc.gov/resources/hubs/suggest2`
 
-**Status**: Intermittently available. Was down (503) during development; the Neo4j graph is the primary data source because of this.
-
 **Parameters**: `q` (query), `searchtype` (`leftanchored` | `keyword`), `count`, `offset`
 
 **Response**: JSON with `hits[]` containing `aLabel`, `uri`, `token`, `vLabel`, `more{marcKeys, varianttitles, rdftypes, contributors, identifiers, subjects}`.
