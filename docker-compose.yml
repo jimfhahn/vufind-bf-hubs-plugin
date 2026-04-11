@@ -1,0 +1,47 @@
+services:
+  vufind:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile
+    ports:
+      - "4567:80"
+      - "8983:8983"
+    volumes:
+      # Mount the plugin module into VuFind
+      - ./module/BibframeHub:/usr/local/vufind/module/BibframeHub
+      # Mount the plugin theme into VuFind
+      - ./themes/bibframehub:/usr/local/vufind/themes/bibframehub
+      # Mount local config overrides
+      - ./docker/local/config/vufind/config.ini:/vufind-local/config/vufind/config.ini
+      - ./docker/local/config/vufind/BibframeHub.ini:/vufind-local/config/vufind/BibframeHub.ini
+      # Persist Solr data
+      - solr-data:/usr/local/vufind/solr/vufind/biblio/index
+      # Persist logs
+      - ./docker/local/cache/log:/vufind-local/cache/log
+    depends_on:
+      db:
+        condition: service_healthy
+    extra_hosts:
+      # Allows VuFind to reach Neo4j on the host machine
+      - "host.docker.internal:host-gateway"
+    environment:
+      - VUFIND_LOCAL_MODULES=BibframeHub
+
+  db:
+    image: mariadb:11
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: vufind
+      MYSQL_USER: vufind
+      MYSQL_PASSWORD: vufind
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  db-data:
+  solr-data:

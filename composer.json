@@ -1,0 +1,17 @@
+{
+    "name": "vufind-bibframehub/bibframehub",
+    "description": "VuFind plugin for BIBFRAME Hub relationship discovery via LC Linked Data Service",
+    "type": "vufind-module",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "php": ">=8.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "BibframeHub\\": "module/BibframeHub/src/BibframeHub/"
+        },
+        "classmap": [
+            "module/BibframeHub/Module.php"
+        ]
+    }
+}

@@ -1,0 +1,13 @@
+# Bulk data files (download from id.loc.gov)
+data/hubs.bibframe.ttl
+data/hubs.bibframe.ttl.gz
+
+# Docker runtime
+docker/local/cache/
+
+# IDE / workspace
+*.code-workspace
+.DS_Store
+
+# Composer
+vendor/

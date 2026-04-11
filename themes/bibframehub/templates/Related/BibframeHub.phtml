@@ -1,0 +1,95 @@
+<?php // Related/BibframeHub template — grouped tree layout ?>
+<?php $groups = $this->related->getGroupedResults(); ?>
+<?php $neo4jSourced = $this->related->isNeo4jSourced(); ?>
+<?php if (!empty($groups)): ?>
+<h4><?=$this->transEsc('Related Works')?></h4>
+
+<?php $hubTitle = $this->related->getHubTitle(); ?>
+<?php $hubUri = $this->related->getHubUri(); ?>
+<?php if ($hubUri && !$neo4jSourced): ?>
+  <div class="bibframe-hub-primary mb-2">
+    <small class="text-muted">
+      Hub: <a href="<?=$this->escapeHtmlAttr($hubUri)?>"
+              target="_blank" rel="noopener">
+        <?=$this->escapeHtml($hubTitle ?? 'View Hub')?>
+      </a>
+    </small>
+  </div>
+<?php elseif ($hubTitle): ?>
+  <div class="bibframe-hub-primary mb-2">
+    <small class="text-muted">Hub: <?=$this->escapeHtml($hubTitle)?></small>
+  </div>
+<?php endif; ?>
+
+<div class="bibframe-hub-tree">
+  <?php $groupIndex = 0; ?>
+  <?php foreach ($groups as $label => $group): ?>
+    <?php
+      $results = $group['results'];
+      $tier = $group['tier'];
+      $count = count($results);
+      $collapseId = 'bfhub-group-' . $groupIndex;
+      // Tier 1-2 expanded by default, 3+ collapsed
+      $expanded = $tier <= 2;
+    ?>
+    <div class="bibframe-hub-group mb-1">
+      <a class="bibframe-hub-group-toggle d-flex align-items-center text-decoration-none text-body py-1"
+         data-bs-toggle="collapse"
+         href="#<?=$collapseId?>"
+         role="button"
+         aria-expanded="<?=$expanded ? 'true' : 'false'?>"
+         aria-controls="<?=$collapseId?>">
+        <span class="bibframe-hub-caret me-1"><?=$expanded ? '&#9660;' : '&#9654;'?></span>
+        <span class="badge bg-light text-dark border me-2"><?=$this->escapeHtml($label)?></span>
+        <small class="text-muted">(<?=$count?>)</small>
+      </a>
+
+      <div class="collapse<?=$expanded ? ' show' : ''?>" id="<?=$collapseId?>">
+        <ul class="list-unstyled ms-3 mb-1">
+          <?php foreach ($results as $result): ?>
+            <?php if (($result['score'] ?? 0) < 20) continue; ?>
+            <li class="bibframe-hub-result py-1">
+              <?php $uri = $result['uri'] ?? ''; ?>
+              <?php if ($uri && !$neo4jSourced): ?>
+              <a href="<?=$this->escapeHtmlAttr($uri)?>"
+                 target="_blank" rel="noopener">
+                <?=$this->escapeHtml($result['title'] ?? 'Unknown')?>
+              </a>
+              <?php else: ?>
+              <span><?=$this->escapeHtml($result['title'] ?? 'Unknown')?></span>
+              <?php endif; ?>
+              <?php if (!empty($result['media'])): ?>
+                <span class="badge bg-info text-dark"><?=$this->escapeHtml(implode(', ', $result['media']))?></span>
+              <?php endif; ?>
+              <?php if (!empty($result['differentAuthor'])): ?>
+                <span class="badge bg-warning text-dark">Different Author</span>
+              <?php endif; ?>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+      </div>
+    </div>
+    <?php $groupIndex++; ?>
+  <?php endforeach; ?>
+</div>
+
+<style>
+  .bibframe-hub-tree { font-size: 0.9em; }
+  .bibframe-hub-group-toggle:hover { background: rgba(0,0,0,0.03); border-radius: 4px; }
+  .bibframe-hub-caret { font-size: 0.7em; width: 1em; text-align: center; transition: transform 0.15s; }
+  .bibframe-hub-group-toggle[aria-expanded="true"] .bibframe-hub-caret { content: ''; }
+  .bibframe-hub-result a { font-size: 0.95em; }
+</style>
+
+<script>
+  // Rotate caret on toggle
+  document.querySelectorAll('.bibframe-hub-group-toggle').forEach(function(el) {
+    el.addEventListener('click', function() {
+      var caret = this.querySelector('.bibframe-hub-caret');
+      var isExpanded = this.getAttribute('aria-expanded') === 'true';
+      caret.innerHTML = isExpanded ? '&#9654;' : '&#9660;';
+    });
+  });
+</script>
+
+<?php endif; ?>
