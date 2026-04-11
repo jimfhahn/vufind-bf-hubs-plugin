@@ -103,6 +103,22 @@ if [ "$RECORD_COUNT" -lt 1 ]; then
         "language": ["English"],
         "publishDate": ["1925"],
         "fullrecord": "<?xml version=\"1.0\"?><record xmlns=\"http://www.loc.gov/MARC21/slim\"><leader>01234nam a2200289 a 4500</leader><controlfield tag=\"001\">test-gatsby-001</controlfield><controlfield tag=\"008\">250101s1925    nyu           000 1 eng d</controlfield><datafield tag=\"100\" ind1=\"1\" ind2=\" \"><subfield code=\"a\">Fitzgerald, F. Scott,</subfield><subfield code=\"d\">1896-1940.</subfield></datafield><datafield tag=\"245\" ind1=\"1\" ind2=\"4\"><subfield code=\"a\">The Great Gatsby /</subfield><subfield code=\"c\">by F. Scott Fitzgerald.</subfield></datafield><datafield tag=\"260\" ind1=\" \" ind2=\" \"><subfield code=\"a\">New York :</subfield><subfield code=\"b\">Charles Scribner&apos;s Sons,</subfield><subfield code=\"c\">1925.</subfield></datafield></record>"
+      },
+      {
+        "id": "test-palinuro-001",
+        "title": "Palinuro of Mexico",
+        "title_short": "Palinuro of Mexico",
+        "title_full": "Palinuro of Mexico / by Fernando del Paso ; translated from the Spanish by Elizabeth Plaister",
+        "title_sort": "palinuro of mexico",
+        "title_auth": "Palinuro of Mexico",
+        "author": "Paso, Fernando del, 1935-2018",
+        "author_sort": "Paso, Fernando del",
+        "format": ["Book"],
+        "record_format": "marc",
+        "language": ["English"],
+        "publishDate": ["2026"],
+        "lccn": "2025027149",
+        "fullrecord": "<?xml version=\"1.0\"?><record xmlns=\"http://www.loc.gov/MARC21/slim\"><leader>03672cam a22004938i 4500</leader><controlfield tag=\"001\">test-palinuro-001</controlfield><controlfield tag=\"008\">250623s2026    txu           000 1 eng  </controlfield><datafield tag=\"010\" ind1=\" \" ind2=\" \"><subfield code=\"a\">  2025027149</subfield></datafield><datafield tag=\"041\" ind1=\"1\" ind2=\" \"><subfield code=\"a\">eng</subfield><subfield code=\"h\">spa</subfield></datafield><datafield tag=\"100\" ind1=\"1\" ind2=\" \"><subfield code=\"a\">Paso, Fernando del,</subfield><subfield code=\"d\">1935-2018</subfield><subfield code=\"e\">author</subfield><subfield code=\"0\">http://id.loc.gov/authorities/names/n86840836</subfield><subfield code=\"1\">http://id.loc.gov/rwo/agents/n86840836</subfield></datafield><datafield tag=\"240\" ind1=\"1\" ind2=\"0\"><subfield code=\"a\">Palinuro de M&#xE9;xico.</subfield><subfield code=\"l\">English</subfield><subfield code=\"1\">http://id.loc.gov/resources/hubs/c9f0947b-4df1-d719-a1c1-ab80fccaed59</subfield></datafield><datafield tag=\"245\" ind1=\"1\" ind2=\"0\"><subfield code=\"a\">Palinuro of Mexico /</subfield><subfield code=\"c\">by Fernando del Paso ; translated from the Spanish by Elizabeth Plaister.</subfield></datafield><datafield tag=\"264\" ind1=\" \" ind2=\"1\"><subfield code=\"a\">Dallas, TX :</subfield><subfield code=\"b\">Dalkey Archive Press,</subfield><subfield code=\"c\">2026.</subfield></datafield><datafield tag=\"336\" ind1=\" \" ind2=\" \"><subfield code=\"a\">text</subfield><subfield code=\"0\">http://id.loc.gov/vocabulary/contentTypes/txt</subfield></datafield><datafield tag=\"655\" ind1=\" \" ind2=\"7\"><subfield code=\"a\">Fiction</subfield><subfield code=\"2\">lcgft</subfield><subfield code=\"0\">http://id.loc.gov/authorities/genreForms/gf2014026339</subfield></datafield><datafield tag=\"655\" ind1=\" \" ind2=\"7\"><subfield code=\"a\">Novels</subfield><subfield code=\"2\">lcgft</subfield><subfield code=\"0\">http://id.loc.gov/authorities/genreForms/gf2015026020</subfield></datafield><datafield tag=\"700\" ind1=\"1\" ind2=\" \"><subfield code=\"a\">Plaister, Elizabeth</subfield><subfield code=\"e\">translator</subfield><subfield code=\"0\">http://id.loc.gov/authorities/names/no93006218</subfield><subfield code=\"1\">http://id.loc.gov/rwo/agents/no93006218</subfield></datafield><datafield tag=\"758\" ind1=\" \" ind2=\" \"><subfield code=\"1\">http://id.loc.gov/resources/instances/24257713</subfield></datafield><datafield tag=\"758\" ind1=\" \" ind2=\" \"><subfield code=\"4\">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield><subfield code=\"1\">http://id.loc.gov/resources/works/24257713</subfield></datafield></record>"
       }
     ]'
   echo ""

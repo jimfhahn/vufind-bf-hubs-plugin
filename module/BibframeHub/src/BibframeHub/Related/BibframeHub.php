@@ -64,9 +64,15 @@ class BibframeHub implements RelatedInterface
             return;
         }
 
-        // Step 1: Resolve Hub URI — try Neo4j first (bulk dataset),
-        // then LC suggest2 API (current URIs)
-        $this->hubUri = $this->resolveHubUri($marcFields);
+        // Step 1: Resolve Hub URI
+        // Modern MARC fast lane: use Hub URI from MARC 758/130/240 $0
+        // when available, skipping the Neo4j/suggest2 resolution cascade.
+        if (!empty($marcFields['hubUri'])) {
+            $this->hubUri = $marcFields['hubUri'];
+        } else {
+            // Legacy resolution: LCCN → Neo4j title → LC suggest2
+            $this->hubUri = $this->resolveHubUri($marcFields);
+        }
         if (!$this->hubUri) {
             return;
         }
@@ -74,7 +80,7 @@ class BibframeHub implements RelatedInterface
         // Pre-set hub title from the catalog record (better than Neo4j's first-found)
         $this->hubTitle = $marcFields['uniformTitle'] ?? $marcFields['title'] ?? null;
 
-        // Save the original URI from resolution (likely Neo4j) for fallback
+        // Save the original URI from resolution for fallback
         $originalUri = $this->hubUri;
 
         // Step 2: Try live RDF from id.loc.gov first (current data, valid URIs),
@@ -306,6 +312,10 @@ class BibframeHub implements RelatedInterface
 
     /**
      * Extract MARC fields from the record driver using available methods.
+     *
+     * Modern MARC records may include Hub URIs directly in $0 subfields
+     * of 130/240 (uniform title) or 758 (resource identifier) fields,
+     * enabling fast Hub resolution without Neo4j or suggest2 lookups.
      */
     protected function extractMarcFields($driver): array
     {
@@ -314,8 +324,11 @@ class BibframeHub implements RelatedInterface
             'title' => null,
             'uniformTitle' => null,
             'lccn' => null,
+            'hubUri' => null,
+            'marc758Relations' => [],
         ];
 
+        // High-level methods (work on all drivers)
         if (method_exists($driver, 'getPrimaryAuthor')) {
             $fields['author'] = $driver->getPrimaryAuthor() ?: null;
         }
@@ -327,25 +340,52 @@ class BibframeHub implements RelatedInterface
             $fields['title'] = $driver->getTitle() ?: null;
         }
 
-        if (method_exists($driver, 'tryMethod')) {
-            $marc130 = $driver->tryMethod('getMarcFieldData', ['130', ['a']]);
-            $marc240 = $driver->tryMethod('getMarcFieldData', ['240', ['a']]);
-            if (!empty($marc130)) {
-                $fields['uniformTitle'] = is_array($marc130) ? $marc130[0] : $marc130;
-            } elseif (!empty($marc240)) {
-                $fields['uniformTitle'] = is_array($marc240) ? $marc240[0] : $marc240;
-            }
-        }
-
         if (method_exists($driver, 'getLCCN')) {
             $fields['lccn'] = $driver->getLCCN() ?: null;
-        } elseif (method_exists($driver, 'tryMethod')) {
-            $lccn = $driver->tryMethod('getMarcFieldData', ['010', ['a']]);
-            if (!empty($lccn)) {
-                $fields['lccn'] = is_array($lccn) ? $lccn[0] : $lccn;
+        }
+
+        // MarcReader-based extraction (SolrMarc drivers with MARC data)
+        $marcReader = method_exists($driver, 'tryMethod')
+            ? $driver->tryMethod('getMarcReader')
+            : null;
+
+        if ($marcReader) {
+            // Uniform title from 130/240 $a
+            if (!$fields['uniformTitle']) {
+                $fields['uniformTitle'] =
+                    $this->getFirstMarcSubfield($marcReader, '130', 'a')
+                    ?? $this->getFirstMarcSubfield($marcReader, '240', 'a');
+            }
+
+            // LCCN fallback from MARC 010 $a
+            if (!$fields['lccn']) {
+                $fields['lccn'] = $this->getFirstMarcSubfield(
+                    $marcReader, '010', 'a'
+                );
+            }
+
+            // --- Modern MARC Fast Lane ---
+
+            // Hub URI from 130/240 $0 or $1 (uniform title with Hub identifier)
+            // e.g. 240 10 $aPalinuro de México. $lEnglish $1http://id.loc.gov/resources/hubs/...
+            $fields['hubUri'] = $this->getFirstHubUriFromField($marcReader, '130')
+                ?? $this->getFirstHubUriFromField($marcReader, '240');
+
+            // 758 Resource Identifier fields
+            $fields['marc758Relations'] = $this->extract758Relations($marcReader);
+
+            // Self-hub URI from 758 if not found in 130/240
+            if (!$fields['hubUri']) {
+                foreach ($fields['marc758Relations'] as $rel) {
+                    if ($rel['isSelfHub'] && !empty($rel['hubUri'])) {
+                        $fields['hubUri'] = $rel['hubUri'];
+                        break;
+                    }
+                }
             }
         }
 
+        // Clean trailing punctuation on string fields
         foreach ($fields as $key => $value) {
             if (is_string($value)) {
                 $fields[$key] = rtrim($value, ' /;:,.');
@@ -353,6 +393,114 @@ class BibframeHub implements RelatedInterface
         }
 
         return $fields;
+    }
+
+    // ── Modern MARC Helper Methods ──────────────────────────────────
+
+    /**
+     * Get the first value of a specific subfield from a MARC field.
+     */
+    protected function getFirstMarcSubfield($marcReader, string $tag, string $code): ?string
+    {
+        $fields = $marcReader->getFields($tag, [$code]);
+        foreach ($fields as $field) {
+            foreach ($field['subfields'] ?? [] as $sf) {
+                if ($sf['code'] === $code && !empty($sf['data'])) {
+                    return trim($sf['data']);
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Find the first Hub resource URI in $0 or $1 subfields of a MARC field.
+     *
+     * Modern MARC uses $1 (Real World Object URI) for Hub URIs in 240/130:
+     *   240 10 $aPalinuro de México. $lEnglish $1http://id.loc.gov/resources/hubs/...
+     */
+    protected function getFirstHubUriFromField($marcReader, string $tag): ?string
+    {
+        $fields = $marcReader->getFields($tag, ['0', '1']);
+        foreach ($fields as $field) {
+            foreach ($field['subfields'] ?? [] as $sf) {
+                if (in_array($sf['code'], ['0', '1'], true)
+                    && $this->isHubResourceUri($sf['data'])
+                ) {
+                    return $sf['data'];
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Check if a URI points to an id.loc.gov Hub resource.
+     */
+    protected function isHubResourceUri(string $uri): bool
+    {
+        return (bool)preg_match('#https?://id\.loc\.gov/resources/hubs/#', $uri);
+    }
+
+    /**
+     * Extract relationship data from MARC 758 fields (Modern MARC).
+     *
+     * Returns array of:
+     *   'hubUri'    => Hub URI found in $0 or $1 (if it's a Hub resource)
+     *   'authUri'   => Authority URI from $0 (may not be a Hub URI)
+     *   'label'     => Human-readable label from $a
+     *   'relLabel'  => Relationship label from $i (e.g., "Parody of (work)")
+     *   'relUri'    => RDA relationship URI from $4
+     *   'isSelfHub' => Whether this identifies the work's own Hub
+     *
+     * @return array[]
+     */
+    protected function extract758Relations($marcReader): array
+    {
+        $relations = [];
+        $fields = $marcReader->getFields('758');
+
+        foreach ($fields as $field) {
+            $subfields = [];
+            foreach ($field['subfields'] ?? [] as $sf) {
+                $subfields[$sf['code']][] = $sf['data'];
+            }
+
+            $label = $subfields['a'][0] ?? null;
+            $relLabel = $subfields['i'][0] ?? null;
+            $authUri = $subfields['0'][0] ?? null;
+            $relUri = $subfields['4'][0] ?? null;
+
+            // Find a Hub URI in either $0 or $1
+            $hubUri = null;
+            $candidates = array_merge($subfields['0'] ?? [], $subfields['1'] ?? []);
+            foreach ($candidates as $uri) {
+                if ($this->isHubResourceUri($uri)) {
+                    $hubUri = $uri;
+                    break;
+                }
+            }
+
+            // Detect self-hub: "Has work manifested" or "Expression of"
+            $isSelfHub = $relLabel && (
+                stripos($relLabel, 'has work manifested') !== false
+                || stripos($relLabel, 'expression of') !== false
+                || stripos($relLabel, 'has expression manifested') !== false
+            );
+
+            if ($hubUri || $relLabel) {
+                $relations[] = [
+                    'hubUri'    => $hubUri,
+                    'authUri'   => $authUri,
+                    'label'     => $label ? rtrim($label, ' /;:,.') : null,
+                    'relLabel'  => $relLabel ? rtrim($relLabel, ' :') : null,
+                    'relUri'    => $relUri,
+                    'isSelfHub' => $isSelfHub,
+                ];
+            }
+        }
+
+        return $relations;
     }
 
     /**

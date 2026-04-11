@@ -47,7 +47,6 @@
       <div class="collapse<?=$expanded ? ' show' : ''?>" id="<?=$collapseId?>">
         <ul class="list-unstyled ms-3 mb-1">
           <?php foreach ($results as $result): ?>
-            <?php if (($result['score'] ?? 0) < 20) continue; ?>
             <li class="bibframe-hub-result py-1">
               <?php $uri = $result['uri'] ?? ''; ?>
               <?php if ($uri && !$neo4jSourced): ?>

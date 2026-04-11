@@ -12,10 +12,11 @@ cd vufind-bf-hubs-plugin
 docker compose up --build
 ```
 
-VuFind will be available at **http://localhost:4567/vufind/**. Three test records are loaded automatically:
+VuFind will be available at **http://localhost:4567/vufind/**. Four test records are loaded automatically:
 - [Pride and Prejudice](http://localhost:4567/vufind/Record/test-pandp-001) — 5 relationship groups
 - [Hamlet](http://localhost:4567/vufind/Record/test-hamlet-001) — 2 relationship groups
 - [The Great Gatsby](http://localhost:4567/vufind/Record/test-gatsby-001) — 4 relationship groups
+- [Palinuro of Mexico](http://localhost:4567/vufind/Record/test-palinuro-001) — Modern MARC fast lane (Hub URI from 240 `$1`)
 
 The Docker setup includes VuFind (PHP 8.3 + Apache), MariaDB, and embedded Solr. Neo4j runs on the host and is accessed via `host.docker.internal`.
 
@@ -174,11 +175,29 @@ A patron viewing *Pride and Prejudice* should see *Death Comes to Pemberley* (P.
 
 ### Data Flow
 
-1. **MARC → Hub URI**: Extract title/author/LCCN from the MARC record → match to a BIBFRAME Hub via Neo4j title search or LCCN lookup.
+1. **MARC → Hub URI**: Resolve the record to a BIBFRAME Hub URI using a priority cascade:
+   - **Modern MARC fast lane**: Direct Hub URI from 240/130 `$1` subfield (instant, no external lookups)
+   - **758 self-hub**: Hub URI from 758 fields with "Expression of" relationship
+   - **Legacy**: LCCN → Neo4j lookup → title search → LC suggest2 API
 2. **RDF-first**: Fetch live RDF/XML from `id.loc.gov/{hubUri}.rdf` → parse typed relationships.
 3. **Neo4j fallback**: If RDF is unavailable, query the graph for all Hub-to-Hub relationships (direct edges + typed `bflc:relationship` links).
 4. **Surprise scoring**: Score each related Hub on a 0–100 scale using four signals.
 5. **Display**: Render grouped results in a collapsible tree in the record sidebar.
+
+### Modern MARC Support
+
+As of LC's **Modern MARC** initiative (March 2026), BIBFRAME identifiers are embedded directly in MARC records. The plugin exploits these for faster, more reliable Hub resolution:
+
+| MARC Field | Subfield | Content | Plugin Use |
+|------------|----------|---------|-----------|
+| 240/130 | `$1` | Hub URI (`id.loc.gov/resources/hubs/...`) | **Primary fast lane** — direct Hub resolution, no API calls |
+| 758 | `$1` | Work/Instance URI (`id.loc.gov/resources/works/...`) | Self-hub detection; work→hub traversal planned |
+| 758 | `$4` | Relationship type URI | Relationship type identification |
+| 100/700 | `$0`/`$1` | Name Authority / RWO URI | Future: precise author-distance scoring |
+
+> **Key finding**: LC uses `$1` (Real World Object URI) rather than `$0` for Hub URIs in 240/130. The plugin checks both subfields.
+
+See [docs/modern-marc-hub-discovery.md](docs/modern-marc-hub-discovery.md) for detailed findings and implementation notes.
 
 ## Surprise Scoring Model
 
@@ -392,6 +411,8 @@ vufind-bf-hubs-plugin/
 ├── themes/bibframehub/
 │   ├── templates/Related/BibframeHub.phtml  ← sidebar panel template
 │   └── theme.config.php
+├── docs/
+│   └── modern-marc-hub-discovery.md   ← Modern MARC field analysis + findings
 ├── docker-compose.yml                 ← Docker dev environment
 ├── docker/                            ← Dockerfile + entrypoint + config overrides
 └── tests/                             ← scoring tests
@@ -422,10 +443,11 @@ maxDisplayResults = 15              ; Max related works to show
 
 ## Roadmap
 
-- **ModernMARC relationship data**: Investigate using ModernMARC relationship designators as an additional or alternative source for work-to-work connections
-- **Refresh Neo4j with current Hubs data**: Automate periodic re-import of the LC bulk Hubs dataset to keep URIs current and reduce reliance on the RDF fallback path
-- **Broader identifier-based Hub lookup**: Use LCCNs, ISBNs, and other identifiers (not just title matching) for more reliable MARC-to-Hub resolution
-- **Collapsible tree UI refinement**: Verify and improve the indented tree display — ensure expand/collapse, caret rotation, and tier-based default states work correctly across browsers
+- **758 Work→Hub traversal**: Use 758 Work URIs to discover Hubs via HEAD request (`x-preflabel` header) → label endpoint (302 redirect). This would provide a second fast lane for records that have 758 but not 240 `$1`.
+- **Authority-based author scoring**: Use 100/700 `$0`/`$1` Name Authority URIs for precise author-distance calculations without Neo4j agent lookups.
+- **Refresh Neo4j with current Hubs data**: Automate periodic re-import of the LC bulk Hubs dataset to keep URIs current and reduce reliance on the RDF fallback path.
+- **Broader identifier-based Hub lookup**: Use ISBNs and other identifiers (not just title/LCCN) for more reliable MARC-to-Hub resolution.
+- **Collapsible tree UI refinement**: Verify and improve the indented tree display — ensure expand/collapse, caret rotation, and tier-based default states work correctly across browsers.
 
 ## License
 
