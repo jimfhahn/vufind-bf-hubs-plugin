@@ -19,10 +19,11 @@ The plugin is **fully operational** in Docker. VuFind at `http://localhost:4567/
    - **Fast lane**: Self-hub URI from 758 fields
    - **Legacy**: LCCN → Neo4j → title → Neo4j → title → LC suggest2 API
 3. **RDF-first**: Fetch live RDF/XML from `id.loc.gov/{hubUri}.rdf` → parse relationships
-4. **Neo4j fallback**: Query graph if RDF unavailable
-5. Score all relationships via 5-tier surprise model
-6. Validate displayed URIs via cached HEAD checks
-7. Render grouped results in sidebar template
+4. **Base-work recovery**: If the resolved Hub has no relationships (e.g. suggest2 returned a collected-works edition), strip AAP qualifiers → label endpoint → canonical base work hub
+5. **Neo4j fallback**: Query graph if RDF unavailable for all candidate URIs
+6. Score all relationships via 5-tier surprise model
+7. Validate displayed URIs via cached HEAD checks
+8. Render grouped results in sidebar template
 
 ## Key Technical Facts
 
@@ -81,7 +82,7 @@ Score = base_tier + rarity_bonus + author_distance + medium_crossing (0–100 sc
 - **`HubRdfParser.php`**: Fetches `{hubUri}.rdf` from id.loc.gov, parses with DOMXPath. Extracts typed relationships, agents, media types. `INLINE_LABEL_MAP` maps ~35 inline labels to scoring slugs.
 - **`Neo4jService.php`**: Read-only Cypher queries against n10s graph via HTTP API. Methods: `findHubByTitle`, `findHubByLccn`, `getHubTitle`, `getHubAgents`, `getHubMediaTypes`, `findRelatedHubs`, `getRelationshipTypeFrequencies`.
 - **`RelationshipInferrer.php`**: 5-tier surprise scoring with `computeSurprise()`, `scoreRelatedHubs()`, `getTier()`, `humanLabel()`.
-- **`HubClient.php`**: LC suggest2 API client for hub lookup. Fallback for newly cataloged works.
+- **`HubClient.php`**: LC suggest2 API client for hub lookup. Fallback for newly cataloged works. `resolveBaseWorkUri()` strips AAP qualifiers and uses the label endpoint to find the canonical base work hub. `lookupByLabel()` preserves the 302 redirect URI (not the suggest2 enrichment URI).
 
 ### Config
 - **`config/BibframeHub.ini`**: `[Connection]` (LC API), `[Neo4j]` (graph DB), `[Display]` (URI validation, max results).

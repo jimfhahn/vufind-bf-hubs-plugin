@@ -180,9 +180,10 @@ A patron viewing *Pride and Prejudice* should see *Death Comes to Pemberley* (P.
    - **758 self-hub**: Hub URI from 758 fields with "Expression of" relationship
    - **Legacy**: LCCN → Neo4j lookup → title search → LC suggest2 API
 2. **RDF-first**: Fetch live RDF/XML from `id.loc.gov/{hubUri}.rdf` → parse typed relationships.
-3. **Neo4j fallback**: If RDF is unavailable, query the graph for all Hub-to-Hub relationships (direct edges + typed `bflc:relationship` links).
-4. **Surprise scoring**: Score each related Hub on a 0–100 scale using four signals.
-5. **Display**: Render grouped results in a collapsible tree in the record sidebar.
+3. **Base-work recovery**: If the resolved Hub has no relationships (e.g. suggest2 returned a collected-works edition), strip AAP qualifiers and look up the canonical base work via the label endpoint.
+4. **Neo4j fallback**: If RDF is unavailable for all candidate URIs, query the graph for all Hub-to-Hub relationships (direct edges + typed `bflc:relationship` links).
+5. **Surprise scoring**: Score each related Hub on a 0–100 scale using four signals.
+6. **Display**: Render grouped results in a collapsible tree in the record sidebar.
 
 ### Modern MARC Support
 
@@ -397,7 +398,7 @@ vufind-bf-hubs-plugin/
 │   ├── config/module.config.php       ← service/plugin registration
 │   └── src/BibframeHub/
 │       ├── Connection/
-│       │   ├── HubClient.php          ← LC suggest2 API client (fallback)
+│       │   ├── HubClient.php          ← LC suggest2/label API client + base-work recovery
 │       │   └── HubClientFactory.php
 │       ├── Graph/
 │       │   ├── HubRdfParser.php       ← id.loc.gov RDF/XML fetcher + parser
