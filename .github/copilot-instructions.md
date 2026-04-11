@@ -10,11 +10,14 @@ A VuFind plugin module (`BibframeHub`) that shows **related works** in the recor
 
 ## Current Status (Working End-to-End)
 
-The plugin is **fully operational** in Docker. VuFind at `http://localhost:4567/vufind/` with test records (P&P, Hamlet, Gatsby) displaying scored related works in the record sidebar.
+The plugin is **fully operational** in Docker. VuFind at `http://localhost:4567/vufind/` with test records (P&P, Hamlet, Gatsby, Palinuro) displaying scored related works in the record sidebar.
 
 ### Data Flow
-1. MARC record → extract title/author/LCCN
-2. Resolve Hub URI via Neo4j title search or LC suggest2 API
+1. MARC record → extract title/author/LCCN + Modern MARC identifiers (240/130 `$1`, 758)
+2. Resolve Hub URI via priority cascade:
+   - **Fast lane**: Direct Hub URI from 240/130 `$0`/`$1` subfield (Modern MARC)
+   - **Fast lane**: Self-hub URI from 758 fields
+   - **Legacy**: LCCN → Neo4j → title → Neo4j → title → LC suggest2 API
 3. **RDF-first**: Fetch live RDF/XML from `id.loc.gov/{hubUri}.rdf` → parse relationships
 4. **Neo4j fallback**: Query graph if RDF unavailable
 5. Score all relationships via 5-tier surprise model
@@ -73,7 +76,7 @@ Score = base_tier + rarity_bonus + author_distance + medium_crossing (0–100 sc
 ## Source Files
 
 ### Plugin Core
-- **`BibframeHub.php`** (Related plugin): Orchestrates hub resolution → RDF fetch → Neo4j fallback → scoring → URI validation. Constructor takes `HubClient`, `Neo4jService`, `HubRdfParser`, `RelationshipInferrer`, `config[]`.
+- **`BibframeHub.php`** (Related plugin): Orchestrates hub resolution → RDF fetch → Neo4j fallback → scoring → URI validation. Constructor takes `HubClient`, `Neo4jService`, `HubRdfParser`, `RelationshipInferrer`, `config[]`. Modern MARC methods: `getFirstHubUriFromField()` (240/130 `$0`/`$1`), `extract758Relations()`, `isHubResourceUri()`.
 - **`BibframeHubFactory.php`**: Laminas factory, reads `BibframeHub.ini`, creates all dependencies.
 - **`HubRdfParser.php`**: Fetches `{hubUri}.rdf` from id.loc.gov, parses with DOMXPath. Extracts typed relationships, agents, media types. `INLINE_LABEL_MAP` maps ~35 inline labels to scoring slugs.
 - **`Neo4jService.php`**: Read-only Cypher queries against n10s graph via HTTP API. Methods: `findHubByTitle`, `findHubByLccn`, `getHubTitle`, `getHubAgents`, `getHubMediaTypes`, `findRelatedHubs`, `getRelationshipTypeFrequencies`.
@@ -85,7 +88,7 @@ Score = base_tier + rarity_bonus + author_distance + medium_crossing (0–100 sc
 - **`docker/local/config/vufind/config.ini`**: Full VuFind config with MariaDB, bibframehub theme, `related[] = "BibframeHub"`.
 
 ### Template
-- **`themes/bibframehub/templates/Related/BibframeHub.phtml`**: Renders scored results as flat list with badges (relationship type, media, different author). Theme extends `bootstrap5`.
+- **`themes/bibframehub/templates/Related/BibframeHub.phtml`**: Renders scored results as collapsible tree grouped by relationship type (via `getGroupedResults()`), with badges for media and different author. Tier 1–2 groups expanded by default. Theme extends `bootstrap5`.
 
 ### Tests
 - `tests/test_surprise_scoring.py` — Python prototype of scoring model.
@@ -97,7 +100,7 @@ Score = base_tier + rarity_bonus + author_distance + medium_crossing (0–100 sc
 cd vufind-plugin && docker compose up --build
 # VuFind: http://localhost:4567/vufind/
 # Solr:   http://localhost:8983
-# Test records: test-pandp-001, test-hamlet-001, test-gatsby-001
+# Test records: test-pandp-001, test-hamlet-001, test-gatsby-001, test-palinuro-001
 ```
 
 - **2 services**: `vufind` (PHP 8.3-apache + embedded Solr) and `db` (MariaDB 11)
@@ -105,6 +108,13 @@ cd vufind-plugin && docker compose up --build
 - Plugin module + theme volume-mounted for live code editing
 - Entrypoint auto-creates DB tables, loads test MARC records into Solr, registers BibframeHub autoloader
 - Neo4j accessed via `host.docker.internal` (runs on host, not in compose)
+
+### Modern MARC Support
+- 240/130 `$1` (Real World Object URI) carries direct Hub URIs — primary fast lane
+- 758 `$1` carries Work/Instance URIs (not Hub URIs) — used for self-hub detection
+- LC uses `$1` not `$0` for Hub URIs; plugin checks both subfields
+- Fast lane skips Neo4j for hub resolution but still uses it for scoring (agent/media lookups on target hubs)
+- See `docs/modern-marc-hub-discovery.md` for detailed findings
 
 ## Coding Conventions
 - PHP 8.1+, PSR-4 autoloading via Composer.
