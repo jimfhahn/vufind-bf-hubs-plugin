@@ -420,6 +420,13 @@ validationCacheTtl = 86400          ; Cache validation results for 24 hours
 maxDisplayResults = 15              ; Max related works to show
 ```
 
+## Roadmap
+
+- **ModernMARC relationship data**: Investigate using ModernMARC relationship designators as an additional or alternative source for work-to-work connections
+- **Refresh Neo4j with current Hubs data**: Automate periodic re-import of the LC bulk Hubs dataset to keep URIs current and reduce reliance on the RDF fallback path
+- **Broader identifier-based Hub lookup**: Use LCCNs, ISBNs, and other identifiers (not just title matching) for more reliable MARC-to-Hub resolution
+- **Collapsible tree UI refinement**: Verify and improve the indented tree display — ensure expand/collapse, caret rotation, and tier-based default states work correctly across browsers
+
 ## License
 
 This project is open source. BIBFRAME Hub data is from the Library of Congress Linked Data Service.
