@@ -336,25 +336,36 @@ def has_relations(uri: str, session: requests.Session) -> bool:
     return validate_canonical(uri, [], session)
 
 
-def fetch_gone_hubs_with_context(limit: int | None) -> list[dict]:
+def fetch_gone_hubs_with_context(
+    limit: int | None,
+    batch_size: int = 5000,
+) -> list[dict]:
     """
-    Pull `gone` Hubs along with their titles and agent URIs in one query.
+    Pull a single page of `gone` Hubs along with their titles and agent URIs.
     Returns rows: {uri, titles: [...], agent_uris: [...]}.
+
+    Each batch returns at most `batch_size` Hubs (or `limit`, whichever is
+    smaller). Naturally resumable: once a Hub gets `canonical_uri` set, it
+    drops out of the WHERE clause, so the next call returns the next page.
+    Hubs that stay `gone` after recovery still match the WHERE, but
+    `last_verified` is updated by write_results() — callers should track
+    cumulative processed count and stop when an empty page is returned.
     """
+    page_size = min(batch_size, limit) if limit else batch_size
     q = """
     MATCH (h:ns0__Hub)
     WHERE h.upstream_status = 'gone'
       AND h.canonical_uri IS NULL
+      AND (h.last_verified IS NULL OR NOT h.last_verified ENDS WITH '_recovery_attempted')
       AND h.uri STARTS WITH 'http'
+    WITH h LIMIT $limit
     OPTIONAL MATCH (h)-[:ns0__title]->(t)
     WITH h, collect(DISTINCT t.ns0__mainTitle) AS title_arrays
     OPTIONAL MATCH (h)-[:ns0__contribution]->(c)-[:ns0__agent]->(a)
     WITH h, title_arrays, collect(DISTINCT a.uri) AS agent_uris
     RETURN h.uri AS uri, title_arrays, agent_uris
     """
-    if limit:
-        q += f"\nLIMIT {int(limit)}"
-    rows = cypher(q)
+    rows = cypher(q, {"limit": page_size})
     out = []
     for r in rows:
         # title_arrays is a list of arrays (n10s stores as string array)
@@ -440,48 +451,136 @@ def recover_one(
 
 
 def run_label_recovery(args: argparse.Namespace) -> None:
-    print(f"Pulling gone Hubs (limit={args.limit or 'all'})...")
-    hubs = fetch_gone_hubs_with_context(args.limit)
-    if not hubs:
-        print("No `gone` Hubs to recover.")
-        return
+    """
+    Chunk-and-stream label recovery for `gone` Hubs.
+
+    Fetches at most `args.batch_size` Hubs at a time, processes them in
+    parallel, writes results, then loops until the source set is empty (or
+    `args.limit` total Hubs have been processed). This avoids materializing
+    all 2.6M Hubs in Python memory at once and keeps Neo4j memory bounded.
+
+    Resumability: write_results() persists `upstream_status`,
+    `canonical_uri`, and `last_verified` per Hub. Recovered Hubs (canonical
+    set) drop out of the next page's WHERE naturally. Hubs that stay `gone`
+    have `last_verified` suffixed with `_recovery_attempted` so they're not
+    re-processed in the same run; remove that suffix to retry.
+    """
     mode = "allow-bare-title" if args.allow_bare_title else "strict"
     dry = " [DRY-RUN]" if args.dry_run else ""
-    print(f"Attempting label-endpoint recovery for {len(hubs)} Hubs "
-          f"(mode={mode}){dry}...")
+    page = args.batch_size
+    target_total = args.limit  # may be None (= all)
+    print(f"Label-endpoint recovery (mode={mode}){dry}, batch={page}, "
+          f"workers={args.workers}, rate-limit={args.rate_limit}s/worker")
 
     session = requests.Session()
-    results = []
-    recovered = 0
-    rejected_disagreement = 0
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futs = {
-            pool.submit(recover_one, h, session, args.allow_bare_title): h
-            for h in hubs
-        }
-        for fut in as_completed(futs):
-            r = fut.result()
-            results.append(r)
-            time.sleep(args.rate_limit / args.workers)
-            if r["canonical_uri"]:
-                recovered += 1
-                print(f"  [recovered] {r['uri']}")
-                print(f"           -> {r['canonical_uri']}")
-                print(f"           via \"{r['matched_label']}\" "
-                      f"(n={r.get('candidate_count', 1)})")
-            elif r.get("note", "").startswith("disagreement"):
-                rejected_disagreement += 1
-                print(f"  [disagree]  {r['uri']}")
-                print(f"              {r['note']}")
+    cumulative = {"processed": 0, "recovered": 0, "disagreement": 0,
+                  "validation_failed": 0}
+    batch_n = 0
+    t_global = time.time()
 
+    while True:
+        if _SHUTDOWN:
+            print("\nShutdown flag set, stopping recovery loop.")
+            break
+        if target_total and cumulative["processed"] >= target_total:
+            print(f"\nReached --limit={target_total}, stopping.")
+            break
+
+        remaining = (target_total - cumulative["processed"]) if target_total else None
+        this_page = min(page, remaining) if remaining else page
+        batch_n += 1
+        t0 = time.time()
+        print(f"\n[batch {batch_n}] fetching up to {this_page} `gone` Hubs...")
+
+        try:
+            hubs = fetch_gone_hubs_with_context(this_page, batch_size=this_page)
+        except Exception as e:
+            print(f"  ERROR: fetch failed: {e}")
+            print("  Sleeping 30s and retrying...")
+            time.sleep(30)
+            continue
+
+        if not hubs:
+            print("  No more `gone` Hubs to recover. Done.")
+            break
+
+        print(f"  got {len(hubs)} Hubs, processing with {args.workers} workers...")
+        results = []
+        batch_recovered = 0
+        batch_disagreement = 0
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            futs = {
+                pool.submit(recover_one, h, session, args.allow_bare_title): h
+                for h in hubs
+            }
+            for fut in as_completed(futs):
+                if _SHUTDOWN:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    break
+                try:
+                    r = fut.result()
+                except Exception as e:
+                    print(f"  worker error: {e}")
+                    continue
+                results.append(r)
+                time.sleep(args.rate_limit / args.workers)
+                if r["canonical_uri"]:
+                    batch_recovered += 1
+                    print(f"  [recovered] {r['uri']}")
+                    print(f"           -> {r['canonical_uri']}")
+                    print(f"           via \"{r['matched_label']}\" "
+                          f"(n={r.get('candidate_count', 1)})")
+                elif (r.get("note") or "").startswith("disagreement"):
+                    batch_disagreement += 1
+                    print(f"  [disagree]  {r['uri']}")
+                    print(f"              {r['note']}")
+
+        # Mark unrecovered Hubs in this batch with a suffix so we don't
+        # re-fetch them in the next page within the same run. They stay
+        # `upstream_status='gone'` with no canonical_uri.
+        if not args.dry_run:
+            for r in results:
+                if not r["canonical_uri"]:
+                    r["_recovery_attempted"] = True
+            try:
+                write_results(results)
+            except Exception as e:
+                print(f"  ERROR: write_results failed: {e}")
+                # Dump unwritten results so we don't lose work.
+                dump = f"unwritten-batch-{batch_n}-{int(time.time())}.json"
+                with open(dump, "w") as f:
+                    json.dump(results, f, indent=2, default=str)
+                print(f"  Results dumped to {dump}; aborting.")
+                break
+
+        # Update cumulative counters
+        cumulative["processed"] += len(results)
+        cumulative["recovered"] += batch_recovered
+        cumulative["disagreement"] += batch_disagreement
+        cumulative["validation_failed"] += (
+            len(results) - batch_recovered - batch_disagreement
+        )
+
+        elapsed = time.time() - t0
+        rate = len(results) / elapsed if elapsed else 0
+        global_elapsed = time.time() - t_global
+        print(f"  [{dt.datetime.now().strftime('%H:%M:%S')}] "
+              f"batch done in {elapsed:.1f}s ({rate:.2f} Hubs/s) \u2014 "
+              f"recovered={batch_recovered}, disagreement={batch_disagreement}")
+        print(f"  cumulative: processed={cumulative['processed']:,} "
+              f"recovered={cumulative['recovered']:,} "
+              f"disagreement={cumulative['disagreement']:,} "
+              f"validation_failed={cumulative['validation_failed']:,} "
+              f"(elapsed {global_elapsed/60:.1f}m)")
+
+    print("\n=== Final cumulative ===")
+    for k, v in cumulative.items():
+        print(f"  {k}: {v:,}")
+    if cumulative["processed"]:
+        pct = 100.0 * cumulative["recovered"] / cumulative["processed"]
+        print(f"  recovery rate: {pct:.2f}%")
     if args.dry_run:
-        print(f"\nDRY-RUN: would recover {recovered}/{len(results)} Hubs "
-              f"(rejected {rejected_disagreement} on disagreement). "
-              f"No writes performed.")
-    else:
-        write_results(results)
-        print(f"\nRecovered {recovered}/{len(results)} previously-gone Hubs "
-              f"(rejected {rejected_disagreement} on disagreement).")
+        print("\nDRY-RUN: no writes performed.")
 
 
 
@@ -531,15 +630,22 @@ def fetch_hubs_to_check(
 
 
 def write_results(results: Iterable[dict]) -> None:
-    """Bulk-write reconciliation results back to the graph via UNWIND."""
+    """Bulk-write reconciliation results back to the graph via UNWIND.
+
+    If a result dict has `_recovery_attempted` truthy, the `last_verified`
+    timestamp is suffixed with `_recovery_attempted` so the chunked
+    label-recovery loop won't re-fetch this Hub on subsequent pages within
+    the same run. (Removing that suffix manually allows a future re-attempt.)
+    """
     items = []
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     for r in results:
+        verified = now + ("_recovery_attempted" if r.get("_recovery_attempted") else "")
         items.append({
             "uri": r["uri"],
             "status": r["status"],
             "canonical": r.get("canonical_uri"),
-            "verified": now,
+            "verified": verified,
         })
     if not items:
         return
