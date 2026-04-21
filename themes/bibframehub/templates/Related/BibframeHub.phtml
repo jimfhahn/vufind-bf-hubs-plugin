@@ -1,12 +1,11 @@
 <?php // Related/BibframeHub template — grouped tree layout ?>
 <?php $groups = $this->related->getGroupedResults(); ?>
-<?php $neo4jSourced = $this->related->isNeo4jSourced(); ?>
 <?php if (!empty($groups)): ?>
 <h4><?=$this->transEsc('Related Works')?></h4>
 
 <?php $hubTitle = $this->related->getHubTitle(); ?>
 <?php $hubUri = $this->related->getHubUri(); ?>
-<?php if ($hubUri && !$neo4jSourced): ?>
+<?php if ($hubUri): ?>
   <div class="bibframe-hub-primary mb-2">
     <small class="text-muted">
       Hub: <a href="<?=$this->escapeHtmlAttr($hubUri)?>"
@@ -49,7 +48,7 @@
           <?php foreach ($results as $result): ?>
             <li class="bibframe-hub-result py-1">
               <?php $uri = $result['uri'] ?? ''; ?>
-              <?php if ($uri && !$neo4jSourced): ?>
+              <?php if ($uri): ?>
               <a href="<?=$this->escapeHtmlAttr($uri)?>"
                  target="_blank" rel="noopener">
                 <?=$this->escapeHtml($result['title'] ?? 'Unknown')?>

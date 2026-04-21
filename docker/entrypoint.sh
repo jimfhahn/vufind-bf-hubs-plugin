@@ -125,6 +125,21 @@ if [ "$RECORD_COUNT" -lt 1 ]; then
   echo "Test records loaded."
 fi
 
+# ── Load Heng et al. 2026 datasets if present ──
+load_heng() {
+  local file="$1" prefix="$2"
+  [ -f "$file" ] || return 0
+  local count
+  count=$(curl -s "http://localhost:8983/solr/biblio/select?q=id:${prefix}-*&rows=0&wt=json" 2>/dev/null | grep -o '"numFound":[0-9]*' | grep -o '[0-9]*' || echo "0")
+  if [ "$count" -lt 1 ]; then
+    echo "Loading $prefix dataset from $file..."
+    php /usr/local/bin/load-heng-marc.php "$file" "$prefix" || echo "WARN: $prefix load failed"
+  else
+    echo "$prefix already loaded ($count records)."
+  fi
+}
+load_heng /data/heng-marc/Concerto-MARC.xml concerto
+
 # ── Set permissions ──
 chown -R www-data:www-data /vufind-local/cache
 

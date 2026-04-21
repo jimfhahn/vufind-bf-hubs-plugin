@@ -30,6 +30,17 @@ class BibframeHub implements RelatedInterface
     /** Runtime cache of URI validation results */
     protected array $validationCache = [];
 
+    /**
+     * Cache of Hub URIs whose live RDF was empty / slow / missing, so we skip
+     * the (sometimes 10+s) id.loc.gov fetch on subsequent requests and go
+     * straight to the Neo4j fallback.
+     *
+     * @var array<string, array{time:int}>
+     */
+    protected array $emptyRdfCache = [];
+    protected int $emptyRdfCacheTtl = 86400;
+    protected ?string $emptyRdfCachePath = null;
+
     public function __construct(
         HubClient $hubClient,
         Neo4jService $neo4j,
@@ -48,6 +59,8 @@ class BibframeHub implements RelatedInterface
         $this->validationCacheTtl = (int)($display['validationCacheTtl'] ?? 86400);
         $this->maxDisplayResults = (int)($display['maxDisplayResults'] ?? 15);
         $this->cachePath = $display['validationCachePath'] ?? null;
+        $this->emptyRdfCacheTtl = (int)($display['emptyRdfCacheTtl'] ?? 86400);
+        $this->emptyRdfCachePath = $display['emptyRdfCachePath'] ?? null;
     }
 
     /**
@@ -82,6 +95,16 @@ class BibframeHub implements RelatedInterface
 
         // Save the original URI from resolution for fallback
         $originalUri = $this->hubUri;
+
+        // Reconciliation fast-path: if the resolved Hub is known-stale and we
+        // have a canonical, swap it in before fetching RDF. Avoids the slow
+        // suggest2 → base-work detour for legacy MARC records whose Neo4j-
+        // sourced URI 404s on id.loc.gov.
+        $reconciled = $this->neo4j->getHubsBulk([$this->hubUri]);
+        $reconciledCanonical = $reconciled[$this->hubUri]['canonical_uri'] ?? null;
+        if ($reconciledCanonical && $reconciledCanonical !== $this->hubUri) {
+            $this->hubUri = $reconciledCanonical;
+        }
 
         // Step 2: Try live RDF from id.loc.gov first (current data, valid URIs),
         // fall back to Neo4j graph (stale but always available)
@@ -118,7 +141,11 @@ class BibframeHub implements RelatedInterface
             $scored = $this->fetchAndScoreViaNeo4j($originalUri);
             $this->resultsFromNeo4j = !empty($scored);
             if ($this->resultsFromNeo4j) {
-                $this->hubUri = $originalUri;
+                // Prefer the reconciled canonical URI for the primary Hub
+                // when the bulk-TTL URI is stale on id.loc.gov.
+                $bulk = $this->neo4j->getHubsBulk([$originalUri]);
+                $canonical = $bulk[$originalUri]['canonical_uri'] ?? null;
+                $this->hubUri = $canonical ?: $originalUri;
             }
         }
 
@@ -126,11 +153,18 @@ class BibframeHub implements RelatedInterface
             return;
         }
 
-        // Step 3: Validate URIs (skip for Neo4j-sourced — bulk URIs are stale)
-        if ($this->resultsFromNeo4j) {
-            $this->results = array_slice($scored, 0, $this->maxDisplayResults);
-        } else {
-            $this->results = $this->validateDisplayedUris($scored);
+        // Step 3: Validate URIs against id.loc.gov.
+        $this->results = $this->validateDisplayedUris($scored);
+
+        // Always validate the primary Hub URI before linking to it. The
+        // RDF fast-lane URIs can also drift, and reconciliation may not
+        // have caught up — hard-validation is the final gate.
+        if ($this->hubUri && $this->validateUris) {
+            $this->loadValidationCache();
+            if (!$this->isHubUriValid($this->hubUri)) {
+                $this->hubUri = null;
+            }
+            $this->saveValidationCache();
         }
     }
 
@@ -205,8 +239,21 @@ class BibframeHub implements RelatedInterface
      */
     protected function fetchAndScoreViaRdf(string $hubUri): array
     {
+        // Skip hubs we've recently confirmed have no scorable RDF relations —
+        // id.loc.gov can take 10–30s to return a giant empty-relations hub,
+        // and that outcome is stable for a given URI.
+        $this->loadEmptyRdfCache();
+        if (isset($this->emptyRdfCache[$hubUri])) {
+            $entry = $this->emptyRdfCache[$hubUri];
+            if (time() - ($entry['time'] ?? 0) < $this->emptyRdfCacheTtl) {
+                return [];
+            }
+        }
+
         $parsed = $this->rdfParser->fetchAndParse($hubUri);
         if (!$parsed || empty($parsed['relations'])) {
+            $this->emptyRdfCache[$hubUri] = ['time' => time()];
+            $this->saveEmptyRdfCache();
             return [];
         }
 
@@ -234,15 +281,20 @@ class BibframeHub implements RelatedInterface
 
         $frequencies = $this->neo4j->getRelationshipTypeFrequencies();
 
+        // Batch-fetch agent/media context for all targets in one Cypher query
+        // rather than one round-trip per Hub during scoring.
+        $targetUris = array_column($relatedHubs, 'targetUri');
+        $bulk = $this->neo4j->getHubsBulk($targetUris);
+
         return $this->scorer->scoreRelatedHubs(
             $sourceAgents,
             $sourceMedia,
             $relatedHubs,
             $frequencies,
             fn(string $uri) => $titleCache[$uri]
-                ?? $this->neo4j->getHubTitle($uri),
-            fn(string $uri) => $this->neo4j->getHubAgents($uri),
-            fn(string $uri) => $this->neo4j->getHubMediaTypes($uri),
+                ?? ($bulk[$uri]['title'] ?? null),
+            fn(string $uri) => $bulk[$uri]['agents'] ?? [],
+            fn(string $uri) => $bulk[$uri]['media']  ?? [],
         );
     }
 
@@ -265,14 +317,49 @@ class BibframeHub implements RelatedInterface
         $sourceMedia = $this->neo4j->getHubMediaTypes($hubUri);
         $frequencies = $this->neo4j->getRelationshipTypeFrequencies();
 
+        // Batch-fetch title/agents/media for every related Hub in one Cypher
+        // round-trip. Includes reconciliation metadata (canonical_uri,
+        // upstream_status) populated by tools/reconcile/reconcile_hubs.py.
+        $originalUris = array_column($relatedHubs, 'targetUri');
+        $bulk = $this->neo4j->getHubsBulk($originalUris);
+
+        // Apply reconciliation: rewrite targetUri to canonical_uri when the
+        // original Hub URI is stale (404 on id.loc.gov) but a current
+        // canonical was discovered. The canonical Hub typically isn't in
+        // our Neo4j snapshot yet, so we keep the *original* Hub's
+        // title/agents/media for scoring & display and only swap the URI
+        // (which is what gets HEAD-validated and linked).
+        // Drop relationships whose target is confirmed gone with no recovery —
+        // HEAD-validating them later would just waste time.
+        $rewritten = [];
+        foreach ($relatedHubs as $rel) {
+            $orig = $rel['targetUri'];
+            $row = $bulk[$orig] ?? null;
+            $status = $row['upstream_status'] ?? null;
+            $canonical = $row['canonical_uri'] ?? null;
+
+            if ($status === 'gone' && !$canonical) {
+                continue; // confirmed dead, no recovery — skip
+            }
+            if ($canonical && $canonical !== $orig) {
+                $rel['targetUri'] = $canonical;
+                // Mirror the original's enrichment under the canonical key
+                // so the scorer's bulk-keyed callbacks still find data.
+                if ($row && !isset($bulk[$canonical])) {
+                    $bulk[$canonical] = $row;
+                }
+            }
+            $rewritten[] = $rel;
+        }
+
         return $this->scorer->scoreRelatedHubs(
             $sourceAgents,
             $sourceMedia,
-            $relatedHubs,
+            $rewritten,
             $frequencies,
-            fn(string $uri) => $this->neo4j->getHubTitle($uri),
-            fn(string $uri) => $this->neo4j->getHubAgents($uri),
-            fn(string $uri) => $this->neo4j->getHubMediaTypes($uri),
+            fn(string $uri) => $bulk[$uri]['title']  ?? null,
+            fn(string $uri) => $bulk[$uri]['agents'] ?? [],
+            fn(string $uri) => $bulk[$uri]['media']  ?? [],
         );
     }
 
@@ -548,21 +635,44 @@ class BibframeHub implements RelatedInterface
         }
 
         $this->loadValidationCache();
-        $validated = [];
 
-        foreach ($results as $result) {
+        // Cap how many we'll validate: enough headroom for misses but bounded.
+        $cap = max(10, $this->maxDisplayResults * 3);
+        $candidates = array_slice($results, 0, $cap);
+
+        // Collect URIs that still need a live HEAD check.
+        $toCheck = [];
+        foreach ($candidates as $i => $result) {
             $uri = $result['uri'] ?? '';
-            if (empty($uri)) {
+            if ($uri === '') {
                 continue;
             }
-
-            if ($this->isHubUriValid($uri)) {
-                $validated[] = $result;
+            if (isset($this->validationCache[$uri])) {
+                $entry = $this->validationCache[$uri];
+                if (time() - ($entry['time'] ?? 0) < $this->validationCacheTtl) {
+                    continue;
+                }
             }
+            $toCheck[$uri] = true;
+        }
 
-            // Stop once we have enough validated results
-            if (count($validated) >= $this->maxDisplayResults) {
-                break;
+        if (!empty($toCheck)) {
+            $this->headCheckUrisParallel(array_keys($toCheck));
+        }
+
+        // Filter in order using the (now fully-populated) cache.
+        $validated = [];
+        foreach ($candidates as $result) {
+            $uri = $result['uri'] ?? '';
+            if ($uri === '') {
+                continue;
+            }
+            $entry = $this->validationCache[$uri] ?? null;
+            if ($entry && ($entry['valid'] ?? false)) {
+                $validated[] = $result;
+                if (count($validated) >= $this->maxDisplayResults) {
+                    break;
+                }
             }
         }
 
@@ -621,6 +731,62 @@ class BibframeHub implements RelatedInterface
     }
 
     /**
+     * HEAD-check a batch of URIs in parallel via curl_multi and populate the
+     * runtime validation cache. Follows up to 3 redirects per URI.
+     *
+     * Parallelism is bounded so we don't open dozens of connections to
+     * id.loc.gov at once. 10 in flight is a reasonable sweet spot.
+     *
+     * @param string[] $uris
+     */
+    protected function headCheckUrisParallel(array $uris): void
+    {
+        $maxParallel = 10;
+        $now = time();
+        $chunks = array_chunk(array_values(array_unique($uris)), $maxParallel);
+
+        foreach ($chunks as $chunk) {
+            $mh = curl_multi_init();
+            $handles = [];
+            foreach ($chunk as $uri) {
+                $ch = curl_init($uri);
+                curl_setopt_array($ch, [
+                    CURLOPT_NOBODY         => true,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_MAXREDIRS      => 3,
+                    CURLOPT_TIMEOUT        => 5,
+                    CURLOPT_CONNECTTIMEOUT => 3,
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_HTTPHEADER     => [
+                        'User-Agent: VuFind-BibframeHub/1.0',
+                    ],
+                ]);
+                curl_multi_add_handle($mh, $ch);
+                $handles[$uri] = $ch;
+            }
+
+            $running = null;
+            do {
+                curl_multi_exec($mh, $running);
+                if ($running) {
+                    curl_multi_select($mh, 1.0);
+                }
+            } while ($running > 0);
+
+            foreach ($handles as $uri => $ch) {
+                $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $this->validationCache[$uri] = [
+                    'valid' => $httpCode >= 200 && $httpCode < 400,
+                    'time'  => $now,
+                ];
+                curl_multi_remove_handle($mh, $ch);
+                curl_close($ch);
+            }
+            curl_multi_close($mh);
+        }
+    }
+
+    /**
      * Load the validation cache from disk.
      */
     protected function loadValidationCache(): void
@@ -674,5 +840,55 @@ class BibframeHub implements RelatedInterface
         }
 
         return null;
+    }
+
+    /**
+     * Path for the "empty RDF" negative cache.
+     */
+    protected function getEmptyRdfCachePath(): ?string
+    {
+        if ($this->emptyRdfCachePath) {
+            return $this->emptyRdfCachePath;
+        }
+        $localDir = defined('LOCAL_OVERRIDE_DIR') ? LOCAL_OVERRIDE_DIR : null;
+        return $localDir ? $localDir . '/cache/bibframehub_empty_rdf.json' : null;
+    }
+
+    protected bool $emptyRdfCacheLoaded = false;
+
+    protected function loadEmptyRdfCache(): void
+    {
+        if ($this->emptyRdfCacheLoaded) {
+            return;
+        }
+        $this->emptyRdfCacheLoaded = true;
+        $path = $this->getEmptyRdfCachePath();
+        if ($path && file_exists($path)) {
+            $data = json_decode(file_get_contents($path), true);
+            if (is_array($data)) {
+                $now = time();
+                $this->emptyRdfCache = array_filter(
+                    $data,
+                    fn($entry) => ($now - ($entry['time'] ?? 0)) < $this->emptyRdfCacheTtl
+                );
+            }
+        }
+    }
+
+    protected function saveEmptyRdfCache(): void
+    {
+        $path = $this->getEmptyRdfCachePath();
+        if (!$path) {
+            return;
+        }
+        $dir = dirname($path);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        @file_put_contents(
+            $path,
+            json_encode($this->emptyRdfCache),
+            LOCK_EX
+        );
     }
 }

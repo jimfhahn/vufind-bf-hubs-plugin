@@ -11,3 +11,8 @@ docker/local/cache/
 
 # Composer
 vendor/
+
+# Reconciliation tooling
+tools/reconcile/.venv/
+tools/reconcile/__pycache__/
+tools/reconcile/sweep-*.log

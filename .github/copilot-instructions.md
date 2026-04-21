@@ -43,6 +43,7 @@ The plugin is **fully operational** in Docker. VuFind at `http://localhost:4567/
 
 ### Neo4j Graph (Fallback Data Source)
 - **Neo4j 5.26** with **n10s 5.26.0** plugin at `localhost:7474` (HTTP) / `localhost:7687` (Bolt).
+- Runs as standalone Docker container `neo4j-hubs` (NOT part of `docker-compose.yml`). Check `docker ps` for it before assuming Neo4j is down.
 - Auth: `neo4j/bibframe123`.
 - **2.39M Hub nodes**, 28.8M total nodes, 117.5M triples from LC bulk download.
 - n10s SHORTEN mode: `ns0` = `bf:` (bibframe), `ns1` = `bflc:`, `ns3` = `dcterms:`.
@@ -79,9 +80,35 @@ Score = base_tier + rarity_bonus + author_distance + medium_crossing (0–100 sc
 - **`BibframeHub.php`** (Related plugin): Orchestrates hub resolution → RDF fetch → Neo4j fallback → scoring → URI validation. Constructor takes `HubClient`, `Neo4jService`, `HubRdfParser`, `RelationshipInferrer`, `config[]`. Modern MARC methods: `getFirstHubUriFromField()` (240/130 `$0`/`$1`), `extract758Relations()`, `isHubResourceUri()`.
 - **`BibframeHubFactory.php`**: Laminas factory, reads `BibframeHub.ini`, creates all dependencies.
 - **`HubRdfParser.php`**: Fetches `{hubUri}.rdf` from id.loc.gov, parses with DOMXPath. Extracts typed relationships, agents, media types. `INLINE_LABEL_MAP` maps ~35 inline labels to scoring slugs.
-- **`Neo4jService.php`**: Read-only Cypher queries against n10s graph via HTTP API. Methods: `findHubByTitle`, `findHubByLccn`, `getHubTitle`, `getHubAgents`, `getHubMediaTypes`, `findRelatedHubs`, `getRelationshipTypeFrequencies`.
+- **`Neo4jService.php`**: Read-only Cypher queries against n10s graph via HTTP API. Methods: `findHubByTitle`, `findHubByLccn`, `getHubTitle`, `getHubAgents`, `getHubMediaTypes`, `findRelatedHubs`, `getRelationshipTypeFrequencies`, **`getHubsBulk(array $hubUris)`** (single-query batch prefetch of title/agents/media for many Hubs — always use this when scoring >1 related Hub).
 - **`RelationshipInferrer.php`**: 5-tier surprise scoring with `computeSurprise()`, `scoreRelatedHubs()`, `getTier()`, `humanLabel()`.
 - **`HubClient.php`**: LC suggest2 API client for hub lookup. Fallback for newly cataloged works. `resolveBaseWorkUri()` strips AAP qualifiers and uses the label endpoint to find the canonical base work hub. `lookupByLabel()` preserves the 302 redirect URI (not the suggest2 enrichment URI).
+
+## Performance Contracts (do not regress)
+
+The plugin must stay under ~0.5s warm per record page. Three caches make that possible; removing or weakening any of them re-introduces the 10–30s hangs we measured in April 2026:
+
+1. **Bulk Neo4j enrichment**: both `fetchAndScoreViaRdf` and `fetchAndScoreViaNeo4j` call `Neo4jService::getHubsBulk()` once, then serve the scorer's per-Hub callbacks from the resulting map. Do **not** reintroduce per-URI `getHubTitle` / `getHubAgents` / `getHubMediaTypes` calls inside the scoring closures.
+2. **Relationship frequency cache**: `getRelationshipTypeFrequencies()` aggregates over 138K+ edges (~2s). Result is persisted to `/vufind-local/cache/bibframehub_rel_frequencies.json` with 24h TTL, wired via `Neo4jServiceFactory`. Distribution is effectively static, so this TTL is safe.
+3. **Negative RDF cache**: some id.loc.gov Hub URIs return HTTP 200 with an empty-relations payload after 10–30s. `BibframeHub::fetchAndScoreViaRdf` records those outcomes in `/vufind-local/cache/bibframehub_empty_rdf.json` (24h TTL) so we skip them and drop straight to Neo4j.
+4. **Parallel HEAD validation**: `headCheckUrisParallel()` uses `curl_multi` at concurrency 10 with 5s timeout. Never replace with a sequential loop — 30× 300ms = 9s of avoidable wait.
+
+All cache paths default from `LOCAL_OVERRIDE_DIR`; override via `[Display]` keys `validationCachePath`, `emptyRdfCachePath`, and `[Neo4j]` key `frequencyCachePath`.
+
+## Hard URI Validation Policy
+
+If a Hub URI does not HEAD-resolve on id.loc.gov (2xx/3xx), it is **not shown** — regardless of source (RDF, suggest2, or Neo4j). This applies to both related-work URIs and the primary Hub URI rendered in the sidebar header. Rationale: the bulk TTL snapshot lags upstream, and surfacing unlinkable titles as if they were canonical Hubs is misleading.
+
+## Hub Reconciliation (`tools/reconcile/`)
+
+Phase 1 of the graph-reconciliation work (see `docs/follow-on-bibframe-hub-graph.md`) is implemented as a Python script in `tools/reconcile/reconcile_hubs.py`.
+
+- HEAD-checks `(:ns0__Hub)` URIs against id.loc.gov, writes `upstream_status` (`live` / `redirect` / `gone` / `error`), `canonical_uri`, and `last_verified` properties.
+- `--label-recovery` mode: for `gone` Hubs, derives `"{agent label}. {title}"` candidates by HEADing `/authorities/names/{id}` for `X-PrefLabel` and HEADing the `/resources/hubs/label/` endpoint for a 302. Empirical recovery rate: ~75% on demo records.
+- **Hardening**: bare-title candidates are only used when no agent labels are available (avoids matching unrelated Hubs with the same title), and any recovered canonical URI is GET-checked for `<bf:relation` content before acceptance (rejects empty Hubs).
+- Indexes added to graph: `hub_status FOR (h:ns0__Hub) ON (h.upstream_status)`, `hub_canonical FOR (h:ns0__Hub) ON (h.canonical_uri)`.
+
+`Neo4jService::getHubsBulk()` returns `canonical_uri` and `upstream_status` alongside title/agents/media. `BibframeHub::fetchAndScoreViaNeo4j()` rewrites each related-Hub `targetUri` to its canonical (mirroring the original's enrichment under the canonical key, since the canonical Hub typically isn't in our snapshot yet) and silently drops Hubs marked `gone` with no recovery. The fast-path also runs canonical substitution on the primary Hub URI before any RDF fetch, avoiding the slow suggest2 → base-work detour for legacy MARC records.
 
 ### Config
 - **`config/BibframeHub.ini`**: `[Connection]` (LC API), `[Neo4j]` (graph DB), `[Display]` (URI validation, max results).

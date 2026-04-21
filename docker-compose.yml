@@ -14,6 +14,10 @@ services:
       # Mount local config overrides
       - ./docker/local/config/vufind/config.ini:/vufind-local/config/vufind/config.ini
       - ./docker/local/config/vufind/BibframeHub.ini:/vufind-local/config/vufind/BibframeHub.ini
+      # Mount the Heng et al. 2026 datasets (read-only)
+      - ../heng-et-al-2026/MARC/MARC:/data/heng-marc:ro
+      # Mount the loader script
+      - ./docker/load-heng-marc.php:/usr/local/bin/load-heng-marc.php:ro
       # Persist Solr data
       - solr-data:/usr/local/vufind/solr/vufind/biblio/index
       # Persist logs

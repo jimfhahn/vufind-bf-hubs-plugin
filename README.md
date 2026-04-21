@@ -414,8 +414,33 @@ vufind-bf-hubs-plugin/
 │   └── modern-marc-hub-discovery.md   ← Modern MARC field analysis + findings
 ├── docker-compose.yml                 ← Docker dev environment
 ├── docker/                            ← Dockerfile + entrypoint + config overrides
+├── tools/
+│   └── reconcile/                     ← Hub URI reconciliation against id.loc.gov
 └── tests/                             ← scoring tests
 ```
+
+## Hub Reconciliation
+
+The bulk-loaded BIBFRAME TTL snapshot drifts from `id.loc.gov` over time:
+URIs get re-minted, hubs get merged, edges go stale. Records that resolve to
+those legacy URIs would render zero results without intervention.
+
+[`tools/reconcile/`](tools/reconcile/README.md) provides a Python script that:
+
+1. HEAD-checks `(:ns0__Hub)` URIs against `id.loc.gov` (live → redirect → gone).
+2. For `gone` Hubs, calls the LC label endpoint with `"{agent}. {title}"`
+   candidates derived from the graph itself.
+3. Verifies any recovered canonical URI actually carries `bf:relation` data
+   before accepting it.
+4. Writes `upstream_status` / `canonical_uri` / `last_verified` back to each Hub.
+
+The plugin reads those properties at query time and substitutes the
+canonical URI in display links. Records whose original Hub URI is
+confirmed dead with no recovery are dropped silently rather than rendered
+as un-clickable text.
+
+Empirical recovery rate on the demo records: **~75 %** of stale Hub URIs
+resolve to a current canonical with verified relationships.
 
 ## Configuration Reference
 

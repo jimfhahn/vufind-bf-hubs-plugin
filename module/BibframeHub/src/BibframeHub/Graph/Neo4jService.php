@@ -25,6 +25,11 @@ class Neo4jService implements LoggerAwareInterface
     /** Cached relationship type frequencies (lazy-loaded). */
     protected ?array $frequencyCache = null;
 
+    /** Optional path to persist the frequency cache (24h TTL). */
+    protected ?string $frequencyCachePath;
+
+    protected int $frequencyCacheTtl = 86400;
+
     public function __construct(array $config = [])
     {
         $this->uri = $config['uri'] ?? 'bolt://localhost:7687';
@@ -32,6 +37,7 @@ class Neo4jService implements LoggerAwareInterface
         $this->password = $config['password'] ?? '';
         $this->database = $config['database'] ?? 'neo4j';
         $this->enabled = !empty($config['enabled']);
+        $this->frequencyCachePath = $config['frequencyCachePath'] ?? null;
     }
 
     public function isEnabled(): bool
@@ -192,6 +198,65 @@ class Neo4jService implements LoggerAwareInterface
     }
 
     /**
+     * Batch-fetch title, agent URIs, and media-type URIs for many Hubs in a
+     * single Cypher round-trip. Huge win over calling getHubTitle/Agents/Media
+     * once per related Hub during scoring.
+     *
+     * Also returns reconciliation metadata (canonical_uri, upstream_status)
+     * populated by `tools/reconcile/reconcile_hubs.py`. Callers should prefer
+     * `canonical_uri` over the original `uri` when present.
+     *
+     * @param string[] $hubUris
+     * @return array<string, array{title: ?string, agents: string[], media: string[],
+     *                             canonical_uri: ?string, upstream_status: ?string}>
+     *         Keyed by Hub URI. Hubs with no data simply return empty fields.
+     */
+    public function getHubsBulk(array $hubUris): array
+    {
+        if (!$this->enabled || empty($hubUris)) {
+            return [];
+        }
+
+        $uris = array_values(array_unique(array_filter($hubUris)));
+
+        try {
+            $rows = $this->runQuery(
+                'UNWIND $uris AS uri
+                 MATCH (h:ns0__Hub {uri: uri})
+                 OPTIONAL MATCH (h)-[:ns0__title]->(t)
+                 OPTIONAL MATCH (h)-[:ns0__contribution]->(c)-[:ns0__agent]->(a)
+                 OPTIONAL MATCH (h)-[:rdf__type]->(tp)
+                 RETURN h.uri AS uri,
+                        h.canonical_uri AS canonical_uri,
+                        h.upstream_status AS upstream_status,
+                        head(collect(DISTINCT t.ns0__mainTitle[0])) AS title,
+                        collect(DISTINCT a.uri) AS agents,
+                        collect(DISTINCT tp.uri) AS media',
+                ['uris' => $uris]
+            );
+        } catch (\Exception $e) {
+            $this->logError('Bulk Hub fetch failed: ' . $e->getMessage());
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            $uri = $row['uri'] ?? null;
+            if (!$uri) {
+                continue;
+            }
+            $out[$uri] = [
+                'title'           => $row['title'] ?? null,
+                'agents'          => array_values(array_filter($row['agents'] ?? [])),
+                'media'           => array_values(array_filter($row['media'] ?? [])),
+                'canonical_uri'   => $row['canonical_uri'] ?? null,
+                'upstream_status' => $row['upstream_status'] ?? null,
+            ];
+        }
+        return $out;
+    }
+
+    /**
      * Get all related Hubs with relationship types.
      * Queries four patterns: direct outbound, direct inbound, typed outbound, typed inbound.
      *
@@ -299,6 +364,19 @@ class Neo4jService implements LoggerAwareInterface
             return $this->frequencyCache;
         }
 
+        // Try disk cache first: distribution over 138K+ edges is essentially
+        // static, so a 24h TTL is fine and saves ~2s per request.
+        if ($this->frequencyCachePath && file_exists($this->frequencyCachePath)) {
+            $age = time() - filemtime($this->frequencyCachePath);
+            if ($age < $this->frequencyCacheTtl) {
+                $data = json_decode(file_get_contents($this->frequencyCachePath), true);
+                if (is_array($data)) {
+                    $this->frequencyCache = $data;
+                    return $this->frequencyCache;
+                }
+            }
+        }
+
         if (!$this->enabled) {
             return [];
         }
@@ -314,6 +392,17 @@ class Neo4jService implements LoggerAwareInterface
             $this->frequencyCache = [];
             foreach ($rows as $row) {
                 $this->frequencyCache[$row['relType']] = (int)$row['freq'];
+            }
+            if ($this->frequencyCachePath) {
+                $dir = dirname($this->frequencyCachePath);
+                if (!is_dir($dir)) {
+                    @mkdir($dir, 0755, true);
+                }
+                @file_put_contents(
+                    $this->frequencyCachePath,
+                    json_encode($this->frequencyCache),
+                    LOCK_EX
+                );
             }
             return $this->frequencyCache;
         } catch (\Exception $e) {
