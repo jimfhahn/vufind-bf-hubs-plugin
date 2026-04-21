@@ -12,12 +12,32 @@ import argparse
 import datetime as dt
 import json
 import os
+import signal
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable
 
 import requests
+
+# Set by SIGINT handler so the sweep loop can exit cleanly between batches.
+_SHUTDOWN = False
+
+
+def _install_signal_handler() -> None:
+    def handler(signum, frame):
+        global _SHUTDOWN
+        if _SHUTDOWN:
+            print("\nForced exit.", file=sys.stderr)
+            sys.exit(130)
+        _SHUTDOWN = True
+        print(
+            "\nShutdown requested — finishing current batch, then exiting. "
+            "Press Ctrl-C again to force.",
+            file=sys.stderr,
+        )
+    signal.signal(signal.SIGINT, handler)
+    signal.signal(signal.SIGTERM, handler)
 
 NEO4J_URL = os.environ.get("NEO4J_URL", "http://localhost:7474")
 NEO4J_DB = os.environ.get("NEO4J_DB", "neo4j")
@@ -136,6 +156,25 @@ def head_check(uri: str, session: requests.Session) -> dict:
                     "status": "gone",
                     "canonical_uri": None,
                     "http_status": status,
+                }
+
+            if status == 429:
+                # Rate-limited: honor Retry-After (seconds) up to a cap, then
+                # report as error so this URI is retried on the next sweep.
+                retry_after = resp.headers.get("Retry-After")
+                wait = 5.0
+                try:
+                    if retry_after:
+                        wait = min(60.0, float(retry_after))
+                except ValueError:
+                    pass
+                time.sleep(wait)
+                return {
+                    "uri": uri,
+                    "status": "error",
+                    "canonical_uri": None,
+                    "http_status": status,
+                    "note": f"rate-limited, slept {wait}s",
                 }
 
             return {
@@ -460,19 +499,36 @@ def run_sweep(args: argparse.Namespace) -> None:
     page = 0
     cumulative: dict[str, int] = {}
     while True:
+        if _SHUTDOWN:
+            print("Shutdown flag set, stopping sweep loop.")
+            break
+
+        # NOTE: SKIP=0 is intentional and required.
+        # The WHERE clause filters out already-verified nodes, so each batch's
+        # write_results() shrinks the pending set. Using a paginated SKIP would
+        # incorrectly walk past unverified nodes on subsequent batches.
         uris = fetch_hubs_to_check(
             batch_size=args.batch_size,
-            skip=0 if args.max_age_days else page * args.batch_size,
+            skip=0,
             max_age_days=args.max_age_days,
         )
         if not uris:
             print(f"No more Hubs to verify. Total processed: {total}")
             break
 
-        print(f"[batch {page + 1}] verifying {len(uris)} URIs...")
+        print(f"[batch {page + 1}] verifying {len(uris)} URIs...", flush=True)
         t0 = time.time()
         results = reconcile_uris(uris, args.workers, args.rate_limit)
-        write_results(results)
+        try:
+            write_results(results)
+        except Exception as e:
+            # Don't lose progress on a transient Neo4j hiccup. Dump to disk
+            # so the operator can replay manually if needed.
+            dump = f"sweep-failed-batch-{int(time.time())}.json"
+            with open(dump, "w") as f:
+                json.dump(results, f)
+            print(f"  WRITE FAILED ({e}). Results dumped to {dump}.")
+            raise
         elapsed = time.time() - t0
 
         counts = summarize(results)
@@ -480,8 +536,10 @@ def run_sweep(args: argparse.Namespace) -> None:
             cumulative[k] = cumulative.get(k, 0) + v
         rate = len(uris) / elapsed if elapsed > 0 else 0
         print(
-            f"  done in {elapsed:.1f}s ({rate:.1f} req/s) — "
-            + ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+            f"  [{dt.datetime.now().strftime('%H:%M:%S')}] "
+            f"done in {elapsed:.1f}s ({rate:.1f} req/s) — "
+            + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())),
+            flush=True,
         )
 
         total += len(uris)
@@ -531,8 +589,9 @@ def parse_args() -> argparse.Namespace:
                    help="Hubs fetched per Cypher page (default: 1000)")
     p.add_argument("--workers", type=int, default=8,
                    help="Concurrent HEAD requests (default: 8)")
-    p.add_argument("--rate-limit", type=float, default=0.4,
-                   help="Per-worker sleep after each request, seconds (default: 0.4)")
+    p.add_argument("--rate-limit", type=float, default=1.6,
+                   help="Per-worker sleep after each request, seconds (default: 1.6, "
+                        "yielding ~5 req/s aggregate at 8 workers)")
     p.add_argument("--max-age-days", type=int, default=None,
                    help="Re-verify Hubs whose last_verified is older than N days. "
                         "If unset, only Hubs with no upstream_status are verified.")
@@ -547,6 +606,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    _install_signal_handler()
 
     if args.apply_schema:
         print("Applying schema...")
