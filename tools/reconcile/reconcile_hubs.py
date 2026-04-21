@@ -313,7 +313,9 @@ def fetch_gone_hubs_with_context(limit: int | None) -> list[dict]:
     """
     q = """
     MATCH (h:ns0__Hub)
-    WHERE h.upstream_status = 'gone' AND h.canonical_uri IS NULL
+    WHERE h.upstream_status = 'gone'
+      AND h.canonical_uri IS NULL
+      AND h.uri STARTS WITH 'http'
     OPTIONAL MATCH (h)-[:ns0__title]->(t)
     WITH h, collect(DISTINCT t.ns0__mainTitle) AS title_arrays
     OPTIONAL MATCH (h)-[:ns0__contribution]->(c)-[:ns0__agent]->(a)
@@ -407,6 +409,9 @@ def fetch_hubs_to_check(
     max_age_days: int | None,
 ) -> list[str]:
     """Fetch a page of Hub URIs needing verification."""
+    # n10s materializes some bnodes as :ns0__Hub with bnode:// URIs (~1.8%
+    # of Hub nodes). Those are not addressable on id.loc.gov and would all
+    # report as `error`, polluting the status distribution. Skip them.
     if max_age_days is not None:
         cutoff_iso = (
             dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=max_age_days)
@@ -414,9 +419,10 @@ def fetch_hubs_to_check(
         rows = cypher(
             """
             MATCH (h:ns0__Hub)
-            WHERE h.upstream_status IS NULL
-               OR h.last_verified IS NULL
-               OR h.last_verified < $cutoff
+            WHERE h.uri STARTS WITH 'http'
+              AND (h.upstream_status IS NULL
+                   OR h.last_verified IS NULL
+                   OR h.last_verified < $cutoff)
             RETURN h.uri AS uri
             ORDER BY h.uri
             SKIP $skip LIMIT $limit
@@ -427,7 +433,8 @@ def fetch_hubs_to_check(
         rows = cypher(
             """
             MATCH (h:ns0__Hub)
-            WHERE h.upstream_status IS NULL
+            WHERE h.uri STARTS WITH 'http'
+              AND h.upstream_status IS NULL
             RETURN h.uri AS uri
             ORDER BY h.uri
             SKIP $skip LIMIT $limit
