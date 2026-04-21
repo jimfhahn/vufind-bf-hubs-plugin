@@ -260,13 +260,18 @@ def label_lookup(label: str, session: requests.Session) -> str | None:
     return None
 
 
-def _candidate_labels(titles: list[str], agent_labels: list[str]) -> list[str]:
+def _candidate_labels(
+    titles: list[str],
+    agent_labels: list[str],
+    allow_bare_title: bool = False,
+) -> list[str]:
     """
     Build label candidates in priority order:
     1. "{agent}. {title}" for each (agent, title) pair  (most specific)
-    2. bare title  — ONLY if no agent labels are available, since
-       bare-title hits often resolve to a different work entirely
-       (e.g. "Hamlet" → some other Hamlet hub, not Shakespeare's).
+    2. bare title  — ONLY if allow_bare_title is True AND no agent labels
+       are available. Bare-title hits often resolve to an unrelated work
+       (e.g. "Hamlet" → some other Hamlet hub, not Shakespeare's), so this
+       is opt-in and should only be enabled when precision can be sacrificed.
     """
     candidates: list[str] = []
     seen: set[str] = set()
@@ -280,17 +285,25 @@ def _candidate_labels(titles: list[str], agent_labels: list[str]) -> list[str]:
     for agent in agent_labels:
         for title in titles:
             add(f"{agent}. {title}")
-    if not agent_labels:
+    if allow_bare_title and not agent_labels:
         for title in titles:
             add(title)
     return candidates
 
 
-def has_relations(uri: str, session: requests.Session) -> bool:
+def validate_canonical(
+    uri: str,
+    agent_uris: list[str],
+    session: requests.Session,
+) -> bool:
     """
-    Verify the recovered canonical Hub actually carries relationship data.
-    Empty hubs (zero `bf:relation` elements) are useless to the plugin and
-    are usually false-positive matches from over-broad label lookups.
+    Verify a recovered canonical Hub actually matches the source Hub:
+      1. GETs the RDF and requires at least one <bf:relation> element
+         (rejects empty placeholder Hubs).
+      2. If agent_uris is non-empty, requires at least one of those agent
+         URIs to appear in the RDF. Catches cross-author false positives
+         (e.g. two different works with the same title but different authors
+         mapping to the same label string).
     """
     rdf_url = uri.replace("http://", "https://", 1) + ".rdf"
     try:
@@ -301,9 +314,26 @@ def has_relations(uri: str, session: requests.Session) -> bool:
         )
         if resp.status_code != 200:
             return False
-        return b"<bf:relation" in resp.content
+        body = resp.content
+        if b"<bf:relation" not in body:
+            return False
+        if agent_uris:
+            # Agent URIs are stored as http://... in Neo4j but the live RDF
+            # may serve https://. Normalize and match as bytes.
+            for a in agent_uris:
+                a_http = a.replace("https://", "http://", 1)
+                a_https = a.replace("http://", "https://", 1)
+                if a_http.encode() in body or a_https.encode() in body:
+                    return True
+            return False  # none of the agents appeared → different work
+        return True
     except requests.RequestException:
         return False
+
+
+# Back-compat alias (tests/other code may import has_relations).
+def has_relations(uri: str, session: requests.Session) -> bool:
+    return validate_canonical(uri, [], session)
 
 
 def fetch_gone_hubs_with_context(limit: int | None) -> list[dict]:
@@ -342,32 +372,70 @@ def fetch_gone_hubs_with_context(limit: int | None) -> list[dict]:
     return out
 
 
-def recover_one(hub: dict, session: requests.Session) -> dict:
-    """Try label-endpoint recovery for a single gone Hub."""
+def recover_one(
+    hub: dict,
+    session: requests.Session,
+    allow_bare_title: bool = False,
+) -> dict:
+    """
+    Try label-endpoint recovery for a single gone Hub.
+
+    Consensus policy: every candidate label is attempted, and a canonical
+    is accepted only when:
+      - a single canonical URI is reached by >=1 candidate(s), AND
+      - no other candidate reaches a *different* valid canonical.
+    If candidates disagree, the Hub stays `gone` (we don't pick a winner).
+    Each candidate's target is validated via validate_canonical(), which
+    requires both bf:relation content and (when agent_uris is non-empty)
+    at least one matching agent URI in the target RDF.
+    """
     agent_labels = [
         lbl for lbl in (get_agent_label(u, session) for u in hub["agent_uris"])
         if lbl
     ]
-    candidates = _candidate_labels(hub["titles"], agent_labels)
+    candidates = _candidate_labels(
+        hub["titles"], agent_labels, allow_bare_title=allow_bare_title,
+    )
+
+    # Collect (label -> canonical) for every candidate that validates.
+    validated: dict[str, str] = {}
     for label in candidates:
         target = label_lookup(label, session)
         if not target:
             continue
-        # Reject canonicals that have no relationship data — usually a
-        # false-positive from over-broad label matching.
-        if not has_relations(target, session):
+        if not validate_canonical(target, hub["agent_uris"], session):
             continue
+        validated[label] = target
+
+    if not validated:
         return {
             "uri": hub["uri"],
-            "status": "redirect",
-            "canonical_uri": target,
-            "matched_label": label,
+            "status": "gone",
+            "canonical_uri": None,
+            "matched_label": None,
         }
+
+    # Consensus: all validated targets must agree.
+    unique_targets = set(validated.values())
+    if len(unique_targets) != 1:
+        return {
+            "uri": hub["uri"],
+            "status": "gone",
+            "canonical_uri": None,
+            "matched_label": None,
+            "note": f"disagreement across {len(validated)} candidates: "
+                    + ", ".join(sorted(unique_targets)),
+        }
+
+    canonical = next(iter(unique_targets))
+    # Prefer the most specific matching label (first in priority order).
+    first_label = next(lbl for lbl in candidates if validated.get(lbl) == canonical)
     return {
         "uri": hub["uri"],
-        "status": "gone",  # remains gone; just refresh last_verified
-        "canonical_uri": None,
-        "matched_label": None,
+        "status": "redirect",
+        "canonical_uri": canonical,
+        "matched_label": first_label,
+        "candidate_count": len(validated),
     }
 
 
@@ -377,13 +445,20 @@ def run_label_recovery(args: argparse.Namespace) -> None:
     if not hubs:
         print("No `gone` Hubs to recover.")
         return
-    print(f"Attempting label-endpoint recovery for {len(hubs)} Hubs...")
+    mode = "allow-bare-title" if args.allow_bare_title else "strict"
+    dry = " [DRY-RUN]" if args.dry_run else ""
+    print(f"Attempting label-endpoint recovery for {len(hubs)} Hubs "
+          f"(mode={mode}){dry}...")
 
     session = requests.Session()
     results = []
     recovered = 0
+    rejected_disagreement = 0
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futs = {pool.submit(recover_one, h, session): h for h in hubs}
+        futs = {
+            pool.submit(recover_one, h, session, args.allow_bare_title): h
+            for h in hubs
+        }
         for fut in as_completed(futs):
             r = fut.result()
             results.append(r)
@@ -392,10 +467,21 @@ def run_label_recovery(args: argparse.Namespace) -> None:
                 recovered += 1
                 print(f"  [recovered] {r['uri']}")
                 print(f"           -> {r['canonical_uri']}")
-                print(f"           via \"{r['matched_label']}\"")
+                print(f"           via \"{r['matched_label']}\" "
+                      f"(n={r.get('candidate_count', 1)})")
+            elif r.get("note", "").startswith("disagreement"):
+                rejected_disagreement += 1
+                print(f"  [disagree]  {r['uri']}")
+                print(f"              {r['note']}")
 
-    write_results(results)
-    print(f"\nRecovered {recovered}/{len(results)} previously-gone Hubs.")
+    if args.dry_run:
+        print(f"\nDRY-RUN: would recover {recovered}/{len(results)} Hubs "
+              f"(rejected {rejected_disagreement} on disagreement). "
+              f"No writes performed.")
+    else:
+        write_results(results)
+        print(f"\nRecovered {recovered}/{len(results)} previously-gone Hubs "
+              f"(rejected {rejected_disagreement} on disagreement).")
 
 
 
@@ -592,6 +678,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--label-recovery", action="store_true",
                    help="Re-process Hubs marked `gone`: try label-endpoint lookup with "
                         "(agent label, title) combinations to find a current canonical URI")
+    p.add_argument("--allow-bare-title", action="store_true",
+                   help="(label-recovery only) Also try bare-title candidates when a "
+                        "Hub has no agent labels. Off by default because bare-title "
+                        "hits are high-risk for false positives.")
+    p.add_argument("--dry-run", action="store_true",
+                   help="(label-recovery only) Report proposed recoveries without "
+                        "writing to Neo4j. Useful for smoke-testing precision changes.")
     p.add_argument("--batch-size", type=int, default=1000,
                    help="Hubs fetched per Cypher page (default: 1000)")
     p.add_argument("--workers", type=int, default=8,

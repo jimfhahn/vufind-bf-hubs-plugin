@@ -16,3 +16,8 @@ vendor/
 tools/reconcile/.venv/
 tools/reconcile/__pycache__/
 tools/reconcile/sweep-*.log
+tools/reconcile/label-recovery-*.log
+tools/reconcile/sweep-pids.txt
+tools/reconcile/recovery-pids.txt
+tools/reconcile/demo-snapshot.json
+tools/reconcile/demo-smoketest-results.json
