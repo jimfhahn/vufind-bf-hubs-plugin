@@ -473,6 +473,13 @@ maxDisplayResults = 15              ; Max related works to show
 - **Broader identifier-based Hub lookup**: Use ISBNs and other identifiers (not just title/LCCN) for more reliable MARC-to-Hub resolution.
 - **Collapsible tree UI refinement**: Verify and improve the indented tree display — ensure expand/collapse, caret rotation, and tier-based default states work correctly across browsers.
 
+## Acknowledgments
+
+- **Library of Congress** for the BIBFRAME ontology, the Hubs dataset, and the `id.loc.gov` Linked Data Service that this plugin depends on end-to-end.
+- **Heng, Kudeki, Lampron, and Han (2026)** for the [openly published Hamlet/Concerto/Local reconciliation corpus](https://doi.org/10.13012/B2IDB-1613787_V1) and the empirical baseline in *[Managing BIBFRAME Work and Hub Entities at Scale](https://doi.org/10.1080/01639374.2026.2655113)*. See [docs/related-work-heng-et-al.md](docs/related-work-heng-et-al.md) for how this plugin's architecture relates to and builds on that work.
+- **VuFind community** for the `\VuFind\Related\RelatedInterface` extension point and the broader plugin architecture that makes this kind of sidebar enrichment a small, well-bounded change.
+- **GitHub Copilot** (Claude Sonnet / Opus models) was used extensively as a pair-programming and exploratory-research assistant throughout this project — for codebase navigation, RDF/Cypher experimentation, surprise-scoring iteration, reconciliation-tool design, and documentation drafting. All architectural decisions, data-model choices, and final code are the author's responsibility, but the velocity and scope of the work would not have been the same without it.
+
 ## License
 
 This project is open source. BIBFRAME Hub data is from the Library of Congress Linked Data Service.
