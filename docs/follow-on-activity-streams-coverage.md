@@ -247,3 +247,87 @@ default for a single page view, so users don't have to edit config to spot-check
 - Need to think about how `all` mode interacts with `getHubsBulk()`'s
   performance contract — uncapped result sets could re-introduce the slow-page
   problem the bulk-prefetch was designed to solve.
+
+## Future: Graph-Algorithm Enhancements (GDS)
+
+Once the graph is at full coverage (post-AS-feed ingest), the
+[Neo4j Graph Data Science library](https://neo4j.com/docs/graph-data-science/current/)
+opens several enhancement paths that aren't viable on a partial graph.
+None of these are critical-path; they're listed in rough order of
+practical-payoff-per-engineering-effort.
+
+### 1. Community detection (Louvain) — most promising
+
+A one-shot batch job (~5 min on the projected hub-relationship graph) that
+assigns each Hub a `community_id` property representing its cluster in
+the typed-relationship graph. These tend to surface intuitive groupings
+(Austen-adjacent novels, Hamlet adaptations across media, the *Don Juan*
+family).
+
+Plugin uses for the materialized property:
+- **Sparse-record fallback**: when a record has fewer than N direct
+  related Hubs, supplement with "Other works in this creative family"
+  drawn from the same `community_id`. Solves the empty-sidebar problem
+  for records with thin relationship data.
+- **Grouping signal in `all` display mode**: show unfiltered related
+  Hubs grouped by community membership rather than alphabetically.
+- **Optional surprise signal**: a related Hub from a *different*
+  community than the source might warrant a small score bonus
+  (orthogonal to author distance and medium crossing).
+
+Cost: one-time batch + a property column. No per-request cost. No
+behavioral change unless the plugin opts into using the property.
+Lowest-risk addition in this section.
+
+### 2. Personalized PageRank as a fifth surprise signal
+
+Per-request: `gds.pageRank.stream` with `sourceNodes: [sourceHub]`
+returns "graph-mass concentration on each neighbor given this source."
+High personalized PR + low global PR = unusually relevant *to this
+work specifically* — a structural cousin to the existing surprise
+heuristic.
+
+Integration would add ~80 lines: a `Neo4jService::getPersonalizedPageRank()`
+method and a fifth term in `RelationshipInferrer::computeSurprise()`
+(0–10 points, behind a `useGdsPageRank` config flag). Honest assessment:
+the existing four-signal model is already producing reasonable rankings,
+so the user-visible lift on a 30-result sidebar is likely modest. Worth
+trying after community detection is in place; not worth doing alone.
+
+### 3. Node embeddings (FastRP) for "all" mode similarity ranking
+
+Precompute a 128-dim embedding per Hub (~10 min batch, ~1.4 GB at
+Hub-count scale, recompute quarterly). Cosine similarity in embedding
+space gives a structural-similarity score that's independent of
+explicit edges. The natural use is sorting the unfiltered "all" mode
+list by similarity to the source rather than alphabetically — turning
+the unfiltered view from a dump into a soft-ranked "structurally
+analogous works" surface.
+
+Only worth doing if/when the `all` display mode ships and there's
+evidence users actually use it.
+
+### 4. Link prediction as a research output
+
+Train `gds.beta.pipeline.linkPrediction` on the typed-relationship
+graph; ask the model to score *non-existent* Hub–Hub edges. The top-k
+predictions are candidate `bf:relation` edges that "should" exist —
+adaptations not yet linked to source works, implied second-order
+relationships, etc.
+
+This is a research project, not a plugin feature — the output is a
+dataset of suggested edges that could be contributed back to LC or
+published as a standalone artifact. Belongs in a separate paper, not
+in the plugin codebase.
+
+### Why this is a follow-on, not now
+
+- All four require the full reconciled graph to be meaningful.
+  Computing communities on today's 70%-stale snapshot would produce
+  clusters that don't reflect the true relationship topology.
+- GDS adds a runtime dependency (the GDS plugin alongside n10s).
+  Users following the README's Neo4j setup would need a new install
+  step. Worth it once the payoff is concrete; premature otherwise.
+- The current scoring model is doing its job. Adding graph-algorithm
+  signals before there's a concrete quality complaint risks
+  over-engineering.
