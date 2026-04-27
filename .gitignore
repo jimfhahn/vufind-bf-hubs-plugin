@@ -21,3 +21,10 @@ tools/reconcile/sweep-pids.txt
 tools/reconcile/recovery-pids.txt
 tools/reconcile/demo-snapshot.json
 tools/reconcile/demo-smoketest-results.json
+
+# Coverage tooling (activity-stream crawler)
+tools/coverage/.venv/
+tools/coverage/__pycache__/
+tools/coverage/crawler-*.log
+tools/coverage/crawler-pids.txt
+tools/coverage/output/
