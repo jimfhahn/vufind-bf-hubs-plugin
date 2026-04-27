@@ -45,18 +45,19 @@ The plugin is **fully operational** in Docker. VuFind at `http://localhost:4567/
 - **Neo4j 5.26** with **n10s 5.26.0** plugin at `localhost:7474` (HTTP) / `localhost:7687` (Bolt).
 - Runs as standalone Docker container `neo4j-hubs` (NOT part of `docker-compose.yml`). Check `docker ps` for it before assuming Neo4j is down.
 - Auth: `neo4j/bibframe123`.
-- **2.39M Hub nodes**, 28.8M total nodes, 117.5M triples from LC bulk download.
+- **~2.65M Hub nodes**, 28.8M total nodes, 117.5M triples from LC bulk download. (id.loc.gov reports ~2.93M live Hubs, so the bulk snapshot is missing ~330K — see `docs/follow-on-activity-streams-coverage.md`.)
 - n10s SHORTEN mode: `ns0` = `bf:` (bibframe), `ns1` = `bflc:`, `ns3` = `dcterms:`.
 - Hub nodes have only `uri` property (UUID-based LC URI).
 - Titles: `(Hub)-[:ns0__title]->(bnode)` where bnode has `ns0__mainTitle` as string array.
 - Agents: `(Hub)-[:ns0__contribution]->(bnode)-[:ns0__agent]->(Resource{uri})` — no name labels, just URIs.
 - Media types: `(Hub)-[:rdf__type]->(Resource)` with URIs like `bf:MovingImage`, `bf:Audio`, `bf:NotatedMusic`.
-- **Direct edges**: `ns0__translationOf` (470K), `ns0__relatedTo` (80K), `ns0__arrangementOf` (23K).
-- **Typed relationships**: `(Hub)-[:ns1__relationship]->(ns1__Relationship)-[:ns1__relation]->(Resource)` → typed URI from `http://id.loc.gov/entities/relationships/`. 138K+ edges, ~100 types.
+- **Direct Hub→Hub edges (bidirectional)**: `ns0__translationOf` (941K), `ns0__relatedTo` (159K), `ns0__arrangementOf` (~23K). These are the only paths where `findRelatedHubs` lands directly on a sibling `:ns0__Hub` node.
+- **Typed relationships**: `(Hub)-[:ns1__relationship]->(ns1__Relationship)-[:ns1__relation]->(Resource)` → typed URI from `http://id.loc.gov/entities/relationships/`. ~138K instances, ~100 types. **Caveat (verified 2026-04-25)**: zero of these `relation` targets carry a Hub URI in our graph — they are work/instance URIs not represented as Hub nodes. Typed relationships contribute scoring metadata but do *not* yield additional Hub→Hub neighbors. See `docs/neo4j-graph-topology.md`.
 - Indexes:
   - `CREATE INDEX hub_uri FOR (h:ns0__Hub) ON (h.uri)` — fast URI lookups.
   - `CREATE FULLTEXT INDEX hub_title_ft FOR (t:ns0__Title) ON EACH [t.ns0__mainTitle]` — title search.
 - Hub disambiguation: count bidirectional relationships `(h)-[r]-(other)` — canonical hubs are primarily *targets*.
+- Reconciliation status (post-recovery 2026-04-25): 494,817 Hubs have `upstream_status='redirect'` + `canonical_uri`; 2,109,226 are still `'gone'` with no recovery; 48,944 bnodes have NULL status. **Recovered Hubs are `'redirect'`, not `'gone'`** — `WHERE upstream_status='gone' AND canonical_uri IS NOT NULL` returns 0; use `WHERE canonical_uri IS NOT NULL`.
 
 ### Surprise Scoring Model
 Score = base_tier + rarity_bonus + author_distance + medium_crossing (0–100 scale).
