@@ -51,7 +51,8 @@ reports total page count.
 - Output: JSONL line per event with `{uri, type, published, actor, bf_types}`.
 - Resume support: write progress checkpoint after each page; skip pages already
   covered if restarted.
-- Cost estimate: ~8 hours single-worker, ~1 hour with 5 workers.
+- Cost estimate (theoretical): ~8 hours single-worker, ~1 hour with 5 workers.
+  **Empirically much higher** — see Operating Procedure below.
 
 ### Step 2 — Reconcile against graph
 
