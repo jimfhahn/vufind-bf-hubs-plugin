@@ -12,6 +12,8 @@ A VuFind plugin module (`BibframeHub`) that shows **related works** in the recor
 
 The plugin is **fully operational** in Docker. VuFind at `http://localhost:4567/vufind/` with test records (P&P, Hamlet, Gatsby, Palinuro) displaying scored related works in the record sidebar.
 
+Graph back-end is the 2026-04-30 LC BIBFRAME Hubs bulk dump loaded into the `neo4j-hubs-new` container (port 7475/7688). Earlier reconciliation tooling (`tools/reconcile/`, `tools/coverage/`, label-recovery, activity-stream crawler, `upstream_status`/`canonical_uri` runtime substitution) has been retired — the upstream snapshot now covers ~99% of live Hubs and the schema changed to a uniform reified pattern that obsoleted the old direct-edge handling.
+
 ### Data Flow
 1. MARC record → extract title/author/LCCN + Modern MARC identifiers (240/130 `$1`, 758)
 2. Resolve Hub URI via priority cascade:
@@ -42,22 +44,27 @@ The plugin is **fully operational** in Docker. VuFind at `http://localhost:4567/
 - Hub URIs in bulk TTL dataset can be stale (404s) — live RDF always has current URIs
 
 ### Neo4j Graph (Fallback Data Source)
-- **Neo4j 5.26** with **n10s 5.26.0** plugin at `localhost:7474` (HTTP) / `localhost:7687` (Bolt).
-- Runs as standalone Docker container `neo4j-hubs` (NOT part of `docker-compose.yml`). Check `docker ps` for it before assuming Neo4j is down.
+- **Neo4j 5.26** with **n10s 5.26.0** plugin at `localhost:7475` (HTTP) / `localhost:7688` (Bolt).
+- Runs as standalone Docker container `neo4j-hubs-new` (NOT part of `docker-compose.yml`). Check `docker ps` for it before assuming Neo4j is down.
 - Auth: `neo4j/bibframe123`.
-- **~2.65M Hub nodes**, 28.8M total nodes, 117.5M triples from LC bulk download. (id.loc.gov reports ~2.93M live Hubs, so the bulk snapshot is missing ~330K — see `docs/follow-on-activity-streams-coverage.md`.)
+- **~2.89M Hub nodes**, ~37.3M total nodes, ~152M triples from the 2026-04-30 LC bulk export. id.loc.gov reports ~2.93M live Hubs (~99% coverage); reconciliation tooling has been retired as no longer necessary.
 - n10s SHORTEN mode: `ns0` = `bf:` (bibframe), `ns1` = `bflc:`, `ns3` = `dcterms:`.
 - Hub nodes have only `uri` property (UUID-based LC URI).
 - Titles: `(Hub)-[:ns0__title]->(bnode)` where bnode has `ns0__mainTitle` as string array.
 - Agents: `(Hub)-[:ns0__contribution]->(bnode)-[:ns0__agent]->(Resource{uri})` — no name labels, just URIs.
 - Media types: `(Hub)-[:rdf__type]->(Resource)` with URIs like `bf:MovingImage`, `bf:Audio`, `bf:NotatedMusic`.
-- **Direct Hub→Hub edges (bidirectional)**: `ns0__translationOf` (941K), `ns0__relatedTo` (159K), `ns0__arrangementOf` (~23K). These are the only paths where `findRelatedHubs` lands directly on a sibling `:ns0__Hub` node.
-- **Typed relationships**: `(Hub)-[:ns1__relationship]->(ns1__Relationship)-[:ns1__relation]->(Resource)` → typed URI from `http://id.loc.gov/entities/relationships/`. ~138K instances, ~100 types. **Caveat (verified 2026-04-25)**: zero of these `relation` targets carry a Hub URI in our graph — they are work/instance URIs not represented as Hub nodes. Typed relationships contribute scoring metadata but do *not* yield additional Hub→Hub neighbors. See `docs/neo4j-graph-topology.md`.
+- **Hub→Hub relations are uniformly reified** via `bf:Relation` blank nodes. There are NO direct `bf:translationOf`/`bf:relatedTo`/`bf:arrangementOf` edges and NO `bflc:Relationship` chain. Pattern:
+  ```
+  (:ns0__Hub)-[:ns0__relation]->(:ns0__Relation)-[:ns0__associatedResource]->(:ns0__Hub)
+  (:ns0__Relation)-[:ns0__relationship]->(rt:Resource)   // typed via rt.uri
+  ```
+  The relation is stored only on the source side, so `findRelatedHubs` traverses both outbound and inbound.
+- Relationship-type URI prefixes are mixed: `http://id.loc.gov/vocabulary/relationship/{type}` (~548K) and `http://id.loc.gov/entities/relationships/{type}` (~60K). The plugin strips both with chained `replace()`. ~22K bnode-typed relations are skipped.
 - Indexes:
   - `CREATE INDEX hub_uri FOR (h:ns0__Hub) ON (h.uri)` — fast URI lookups.
   - `CREATE FULLTEXT INDEX hub_title_ft FOR (t:ns0__Title) ON EACH [t.ns0__mainTitle]` — title search.
 - Hub disambiguation: count bidirectional relationships `(h)-[r]-(other)` — canonical hubs are primarily *targets*.
-- Reconciliation status (post-recovery 2026-04-25): 494,817 Hubs have `upstream_status='redirect'` + `canonical_uri`; 2,109,226 are still `'gone'` with no recovery; 48,944 bnodes have NULL status. **Recovered Hubs are `'redirect'`, not `'gone'`** — `WHERE upstream_status='gone' AND canonical_uri IS NOT NULL` returns 0; use `WHERE canonical_uri IS NOT NULL`.
+- Import gotcha: pass `verifyUriSyntax: false` to `n10s.rdf.import.fetch` — the bulk file contains a handful of non-conformant URIs that abort the load otherwise. See `docs/neo4j-graph-topology.md`.
 
 ### Surprise Scoring Model
 Score = base_tier + rarity_bonus + author_distance + medium_crossing (0–100 scale).
@@ -81,7 +88,7 @@ Score = base_tier + rarity_bonus + author_distance + medium_crossing (0–100 sc
 - **`BibframeHub.php`** (Related plugin): Orchestrates hub resolution → RDF fetch → Neo4j fallback → scoring → URI validation. Constructor takes `HubClient`, `Neo4jService`, `HubRdfParser`, `RelationshipInferrer`, `config[]`. Modern MARC methods: `getFirstHubUriFromField()` (240/130 `$0`/`$1`), `extract758Relations()`, `isHubResourceUri()`.
 - **`BibframeHubFactory.php`**: Laminas factory, reads `BibframeHub.ini`, creates all dependencies.
 - **`HubRdfParser.php`**: Fetches `{hubUri}.rdf` from id.loc.gov, parses with DOMXPath. Extracts typed relationships, agents, media types. `INLINE_LABEL_MAP` maps ~35 inline labels to scoring slugs.
-- **`Neo4jService.php`**: Read-only Cypher queries against n10s graph via HTTP API. Methods: `findHubByTitle`, `findHubByLccn`, `getHubTitle`, `getHubAgents`, `getHubMediaTypes`, `findRelatedHubs`, `getRelationshipTypeFrequencies`, **`getHubsBulk(array $hubUris)`** (single-query batch prefetch of title/agents/media for many Hubs — always use this when scoring >1 related Hub).
+- **`Neo4jService.php`**: Read-only Cypher queries against n10s graph via HTTP API. Methods: `findHubByTitle`, `findHubByLccn`, `getHubTitle`, `getHubAgents`, `getHubMediaTypes`, `findRelatedHubs` (uses the new `bf:relation`/`bf:Relation`/`bf:associatedResource`/`bf:relationship` reified pattern, traversed bidirectionally, with both `vocabulary/relationship/` and `entities/relationships/` URI prefixes stripped), `getRelationshipTypeFrequencies`, **`getHubsBulk(array $hubUris)`** (single-query batch prefetch of title/agents/media for many Hubs — always use this when scoring >1 related Hub).
 - **`RelationshipInferrer.php`**: 5-tier surprise scoring with `computeSurprise()`, `scoreRelatedHubs()`, `getTier()`, `humanLabel()`.
 - **`HubClient.php`**: LC suggest2 API client for hub lookup. Fallback for newly cataloged works. `resolveBaseWorkUri()` strips AAP qualifiers and uses the label endpoint to find the canonical base work hub. `lookupByLabel()` preserves the 302 redirect URI (not the suggest2 enrichment URI).
 
@@ -98,18 +105,7 @@ All cache paths default from `LOCAL_OVERRIDE_DIR`; override via `[Display]` keys
 
 ## Hard URI Validation Policy
 
-If a Hub URI does not HEAD-resolve on id.loc.gov (2xx/3xx), it is **not shown** — regardless of source (RDF, suggest2, or Neo4j). This applies to both related-work URIs and the primary Hub URI rendered in the sidebar header. Rationale: the bulk TTL snapshot lags upstream, and surfacing unlinkable titles as if they were canonical Hubs is misleading.
-
-## Hub Reconciliation (`tools/reconcile/`)
-
-Phase 1 of the graph-reconciliation work (see `docs/follow-on-bibframe-hub-graph.md`) is implemented as a Python script in `tools/reconcile/reconcile_hubs.py`.
-
-- HEAD-checks `(:ns0__Hub)` URIs against id.loc.gov, writes `upstream_status` (`live` / `redirect` / `gone` / `error`), `canonical_uri`, and `last_verified` properties.
-- `--label-recovery` mode: for `gone` Hubs, derives `"{agent label}. {title}"` candidates by HEADing `/authorities/names/{id}` for `X-PrefLabel` and HEADing the `/resources/hubs/label/` endpoint for a 302. Empirical recovery rate: ~75% on demo records.
-- **Hardening**: bare-title candidates are only used when no agent labels are available (avoids matching unrelated Hubs with the same title), and any recovered canonical URI is GET-checked for `<bf:relation` content before acceptance (rejects empty Hubs).
-- Indexes added to graph: `hub_status FOR (h:ns0__Hub) ON (h.upstream_status)`, `hub_canonical FOR (h:ns0__Hub) ON (h.canonical_uri)`.
-
-`Neo4jService::getHubsBulk()` returns `canonical_uri` and `upstream_status` alongside title/agents/media. `BibframeHub::fetchAndScoreViaNeo4j()` rewrites each related-Hub `targetUri` to its canonical (mirroring the original's enrichment under the canonical key, since the canonical Hub typically isn't in our snapshot yet) and silently drops Hubs marked `gone` with no recovery. The fast-path also runs canonical substitution on the primary Hub URI before any RDF fetch, avoiding the slow suggest2 → base-work detour for legacy MARC records.
+If a Hub URI does not HEAD-resolve on id.loc.gov (2xx/3xx), it is **not shown** — regardless of source (RDF, suggest2, or Neo4j). This applies to both related-work URIs and the primary Hub URI rendered in the sidebar header. Rationale: the bulk TTL snapshot can still drift between LC publishes, and surfacing unlinkable titles as if they were canonical Hubs is misleading.
 
 ### Config
 - **`config/BibframeHub.ini`**: `[Connection]` (LC API), `[Neo4j]` (graph DB), `[Display]` (URI validation, max results).

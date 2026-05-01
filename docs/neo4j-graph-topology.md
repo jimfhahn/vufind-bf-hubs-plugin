@@ -1,88 +1,75 @@
 # Neo4j Hub Graph Topology
 
-Verified 2026-04-25 against the live `neo4j-hubs` container (Neo4j 5.26, n10s 5.26.0)
-after the label-recovery sweep completed.
+Verified 2026-05-01 against the `neo4j-hubs-new` container running the
+2026-04-30 LC BIBFRAME Hubs bulk dump (Neo4j 5.26.24, n10s 5.26.0,
+SHORTEN namespace mode).
 
-## Hub population
+## Snapshot stats
 
-| Status | Count | Notes |
-| --- | --- | --- |
-| `redirect` (recovered, has `canonical_uri`) | 494,817 | Live on id.loc.gov via 30x or label-endpoint match |
-| `gone` (no canonical recovered) | 2,109,226 | Genuinely dead; no label match |
-| NULL `upstream_status` | 48,944 | Bnodes — filtered by reconciler |
-| `error` | 3 | Transient failures during sweep |
-| **Total `:ns0__Hub` nodes** | **~2.65M** | (snapshot from earlier bulk TTL load) |
-
-id.loc.gov reports ~2.93M Hubs, so the snapshot is missing ~330K (~11%). See
-[follow-on-activity-streams-coverage.md](follow-on-activity-streams-coverage.md)
-for the planned closure of that gap.
-
-## Reconciliation status convention (gotcha)
-
-Recovery flips `upstream_status` from `'gone'` → `'redirect'` **and** sets
-`canonical_uri`. The two are mutually exclusive after a successful recovery.
-
-- ❌ Wrong: `WHERE upstream_status = 'gone' AND canonical_uri IS NOT NULL` returns 0.
-- ✅ Right: `WHERE canonical_uri IS NOT NULL` (or `upstream_status = 'redirect'`).
-
-## Hub→Hub direct edges (bidirectional `-[r]-` totals)
-
-| Edge type | Count |
+| Metric | Value |
 | --- | --- |
-| `ns0__translationOf` | 941,214 |
-| `ns0__relatedTo` | 158,725 |
-| `ns0__arrangementOf` | ~23K (per earlier counts; not re-verified 2026-04-25) |
+| Total triples loaded | ~152M |
+| Total nodes | ~37.3M |
+| Total relationships | ~69.1M |
+| `:ns0__Hub` nodes | ~2.89M |
+| `:ns0__Relation` reification nodes | ~547,756 |
+| `bf:Relation -[:associatedResource]-> Hub` edges | ~532,543 |
 
-These are the only edges where `Neo4jService::findRelatedHubs` can land on a
-sibling `:ns0__Hub` node directly.
+LC reports ~2.93M live Hubs, so this snapshot is ~99% complete. There is
+no longer any meaningful gap to chase via activity-stream ingestion or
+label-recovery reconciliation.
 
-## Typed relationships (`bflc:Relationship` chains)
+## How relationships are modeled
 
-Pattern:
+Every Hub→Hub relationship in the new dump is a uniform reified pattern.
+There are **no direct `bf:translationOf` / `bf:relatedTo` /
+`bf:arrangementOf` edges between Hubs**, and the older
+`bflc:Relationship` chain is gone too.
 
 ```
-(Hub)-[:ns1__relationship]->(:ns1__Relationship)-[:ns1__relation]->(target:Resource)
+(source:ns0__Hub)
+   -[:ns0__relation]->
+      (:ns0__Relation)
+         -[:ns0__associatedResource]-> (target:ns0__Hub)
+         -[:ns0__relationship]-> (rt:Resource)   // typed via rt.uri
 ```
 
-~138K relationship instances spanning ~100 types under
-`http://id.loc.gov/entities/relationships/`.
+The relation is recorded only on the source side, so traversal must be
+bidirectional to find all neighbors.
 
-**Critical finding (2026-04-25)**: zero of these targets carry a Hub URI in our
-graph. Verified:
+## Relationship-type URI prefixes
 
-```cypher
-MATCH (h:ns0__Hub)-[:ns1__relationship]->(rel)-[:ns1__relation]->(target)
-WHERE target.uri STARTS WITH "http://id.loc.gov/resources/hubs/"
-RETURN count(*)            // → 0
-```
+Relationship-type URIs come in two flavors which the plugin strips
+uniformly:
 
-Targets are presumably `/resources/works/` or `/resources/instances/` URIs that
-were not represented as `:ns0__Hub` nodes in the bulk load. **Implication**: the
-plugin's typed-relationship traversal in Neo4j cannot cross from one Hub to
-another via this path. All Neo4j-side Hub→Hub discovery currently flows through
-the three direct edge types above.
+| Prefix | Count | Notes |
+| --- | --- | --- |
+| `http://id.loc.gov/vocabulary/relationship/` | ~547,751 | Dominant; newer typed set |
+| `http://id.loc.gov/entities/relationships/` | ~60,201 | Older typed set; still actively used |
+| `bnode://...` | ~21,694 | Skipped by `findRelatedHubs` |
 
-## Why the demo records don't exercise canonical substitution
+`Neo4jService::findRelatedHubs()` and
+`Neo4jService::getRelationshipTypeFrequencies()` apply both
+`replace()` calls to normalize to the bare slug
+(e.g. `translationof`, `operaadaptationof`).
 
-All four bundled demo records (`test-pandp-001`, `test-hamlet-001`,
-`test-gatsby-001`, `test-palinuro-001`) resolve via the **RDF fast-lane** —
-their primary Hub URI returns a populated `bf:relation` block from id.loc.gov,
-so `BibframeHub::fetchAndScoreViaRdf` returns successfully and the Neo4j
-fallback never runs. The label-recovery work surfaces only when:
+## Other Hub-side patterns (unchanged from prior dumps)
 
-1. A record's primary Hub URI returns no live RDF (or empty relations), **and**
-2. The Neo4j fallback finds direct-edge neighbors that have
-   `canonical_uri IS NOT NULL`.
+- **Titles**: `(Hub)-[:ns0__title]->(Title)` where `Title.ns0__mainTitle`
+  is a string array.
+- **Contributors**: `(Hub)-[:ns0__contribution]->(Contribution)-[:ns0__agent]->(Agent)`.
+  Agent nodes have only a `uri` (no name labels).
+- **Media types**: `(Hub)-[:rdf__type]->(Resource)` where `Resource.uri`
+  is one of `bf:MovingImage`, `bf:Audio`, `bf:NotatedMusic`, `bf:Text`,
+  `bf:Multimedia`, `bf:Arrangement`, `bf:NotatedMovement`.
+- **Identifiers**: `(Hub)-[:ns0__identifiedBy]->(Identifier)` where
+  `Identifier.rdf__value` carries the LCCN/ISBN/etc.
 
-To validate canonical substitution end-to-end we need to either load more MARC
-records (especially older catalog data whose Hubs are stale) or construct a
-synthetic test that bypasses the RDF cache.
+## What was retired
 
-## Query performance notes
-
-- Always look up by URI via `:ns0__Hub {uri: '...'}` (uses the `hub_uri` index).
-- Full-graph aggregations over the 117M-triple store routinely time out at
-  60s+. Use the bulk fetch in `Neo4jService::getHubsBulk()` rather than
-  per-Hub round trips.
-- Bidirectional `-[r]-` traversals must always be bounded (`LIMIT`,
-  fixed-depth pattern, or anchored to an indexed start node).
+Earlier work tracked legacy-Hub reconciliation:
+`upstream_status` / `canonical_uri` properties, label-recovery sweeps,
+the activity-stream crawler. None of that is present on this graph and
+none of the code paths that referenced those properties remain in the
+plugin. The 2026-04-30 snapshot already mirrors live id.loc.gov closely
+enough that runtime canonical substitution is no longer warranted.

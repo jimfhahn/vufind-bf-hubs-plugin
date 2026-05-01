@@ -202,13 +202,8 @@ class Neo4jService implements LoggerAwareInterface
      * single Cypher round-trip. Huge win over calling getHubTitle/Agents/Media
      * once per related Hub during scoring.
      *
-     * Also returns reconciliation metadata (canonical_uri, upstream_status)
-     * populated by `tools/reconcile/reconcile_hubs.py`. Callers should prefer
-     * `canonical_uri` over the original `uri` when present.
-     *
      * @param string[] $hubUris
-     * @return array<string, array{title: ?string, agents: string[], media: string[],
-     *                             canonical_uri: ?string, upstream_status: ?string}>
+     * @return array<string, array{title: ?string, agents: string[], media: string[]}>
      *         Keyed by Hub URI. Hubs with no data simply return empty fields.
      */
     public function getHubsBulk(array $hubUris): array
@@ -227,8 +222,6 @@ class Neo4jService implements LoggerAwareInterface
                  OPTIONAL MATCH (h)-[:ns0__contribution]->(c)-[:ns0__agent]->(a)
                  OPTIONAL MATCH (h)-[:rdf__type]->(tp)
                  RETURN h.uri AS uri,
-                        h.canonical_uri AS canonical_uri,
-                        h.upstream_status AS upstream_status,
                         head(collect(DISTINCT t.ns0__mainTitle[0])) AS title,
                         collect(DISTINCT a.uri) AS agents,
                         collect(DISTINCT tp.uri) AS media',
@@ -246,11 +239,9 @@ class Neo4jService implements LoggerAwareInterface
                 continue;
             }
             $out[$uri] = [
-                'title'           => $row['title'] ?? null,
-                'agents'          => array_values(array_filter($row['agents'] ?? [])),
-                'media'           => array_values(array_filter($row['media'] ?? [])),
-                'canonical_uri'   => $row['canonical_uri'] ?? null,
-                'upstream_status' => $row['upstream_status'] ?? null,
+                'title'  => $row['title'] ?? null,
+                'agents' => array_values(array_filter($row['agents'] ?? [])),
+                'media'  => array_values(array_filter($row['media'] ?? [])),
             ];
         }
         return $out;
@@ -258,7 +249,18 @@ class Neo4jService implements LoggerAwareInterface
 
     /**
      * Get all related Hubs with relationship types.
-     * Queries four patterns: direct outbound, direct inbound, typed outbound, typed inbound.
+     *
+     * 2026-04-30 LC bulk dump uses a uniform reified pattern:
+     *   (:ns0__Hub)-[:ns0__relation]->(:ns0__Relation)-[:ns0__associatedResource]->(:ns0__Hub)
+     *   (:ns0__Relation)-[:ns0__relationship]->(rt)  // typed via URI on rt.uri
+     *
+     * Relationship-type URIs come in two prefix flavors:
+     *   - http://id.loc.gov/vocabulary/relationship/  (~548K, dominant)
+     *   - http://id.loc.gov/entities/relationships/   (~60K, the older typed set)
+     * Plus ~22K bnode-typed Relations we skip.
+     *
+     * The new schema records each relation only on the source side, so we must
+     * traverse both outbound and inbound to discover all neighbors.
      *
      * @return array[] Each element: ['targetUri' => string, 'relType' => string, 'isDirect' => bool]
      */
@@ -271,68 +273,45 @@ class Neo4jService implements LoggerAwareInterface
         $results = [];
 
         try {
-            // 1. Direct outbound Hub→Hub edges (translationOf, relatedTo, arrangementOf)
             $outbound = $this->runQuery(
-                'MATCH (h:ns0__Hub)-[r]->(target:ns0__Hub)
-                 WHERE h.uri = $uri
-                 RETURN type(r) AS edgeType, target.uri AS targetUri',
+                'MATCH (h:ns0__Hub {uri: $uri})-[:ns0__relation]->(rel:ns0__Relation)-[:ns0__associatedResource]->(target:ns0__Hub)
+                 OPTIONAL MATCH (rel)-[:ns0__relationship]->(rt)
+                 WITH target, rt
+                 WHERE rt IS NULL OR rt.uri IS NULL OR NOT rt.uri STARTS WITH "bnode"
+                 RETURN target.uri AS targetUri,
+                        CASE WHEN rt IS NULL OR rt.uri IS NULL THEN "related"
+                             ELSE replace(replace(rt.uri,
+                                  "http://id.loc.gov/vocabulary/relationship/", ""),
+                                  "http://id.loc.gov/entities/relationships/", "")
+                        END AS relType',
                 ['uri' => $hubUri]
             );
             foreach ($outbound as $row) {
                 $results[] = [
                     'targetUri' => $row['targetUri'],
-                    'relType' => $row['edgeType'],
-                    'isDirect' => true,
+                    'relType'   => $row['relType'],
+                    'isDirect'  => false,
                 ];
             }
 
-            // 2. Direct inbound (skip relatedTo — already got those outbound)
             $inbound = $this->runQuery(
-                'MATCH (source:ns0__Hub)-[r]->(h:ns0__Hub)
-                 WHERE h.uri = $uri AND type(r) <> "ns0__relatedTo"
-                 RETURN type(r) AS edgeType, source.uri AS sourceUri',
+                'MATCH (h:ns0__Hub {uri: $uri})<-[:ns0__associatedResource]-(rel:ns0__Relation)<-[:ns0__relation]-(source:ns0__Hub)
+                 OPTIONAL MATCH (rel)-[:ns0__relationship]->(rt)
+                 WITH source, rt
+                 WHERE rt IS NULL OR rt.uri IS NULL OR NOT rt.uri STARTS WITH "bnode"
+                 RETURN source.uri AS targetUri,
+                        CASE WHEN rt IS NULL OR rt.uri IS NULL THEN "related"
+                             ELSE replace(replace(rt.uri,
+                                  "http://id.loc.gov/vocabulary/relationship/", ""),
+                                  "http://id.loc.gov/entities/relationships/", "")
+                        END AS relType',
                 ['uri' => $hubUri]
             );
             foreach ($inbound as $row) {
                 $results[] = [
-                    'targetUri' => $row['sourceUri'],
-                    'relType' => $row['edgeType'] . '_INBOUND',
-                    'isDirect' => true,
-                ];
-            }
-
-            // 3. Typed outbound via bflc:relationship
-            $typedOut = $this->runQuery(
-                'MATCH (h:ns0__Hub)-[:ns1__relationship]->(rel:ns1__Relationship)-[:ns1__relation]->(rt)
-                 WHERE h.uri = $uri AND NOT rt.uri STARTS WITH "bnode"
-                 MATCH (rel)-[:ns0__relatedTo]->(target:ns0__Hub)
-                 RETURN replace(rt.uri, "http://id.loc.gov/entities/relationships/", "") AS relType,
-                        target.uri AS targetUri',
-                ['uri' => $hubUri]
-            );
-            foreach ($typedOut as $row) {
-                $results[] = [
                     'targetUri' => $row['targetUri'],
-                    'relType' => $row['relType'],
-                    'isDirect' => false,
-                ];
-            }
-
-            // 4. Typed inbound
-            $typedIn = $this->runQuery(
-                'MATCH (source:ns0__Hub)-[:ns1__relationship]->(rel:ns1__Relationship)-[:ns1__relation]->(rt)
-                 WHERE NOT rt.uri STARTS WITH "bnode"
-                 MATCH (rel)-[:ns0__relatedTo]->(h:ns0__Hub)
-                 WHERE h.uri = $uri
-                 RETURN replace(rt.uri, "http://id.loc.gov/entities/relationships/", "") AS relType,
-                        source.uri AS sourceUri',
-                ['uri' => $hubUri]
-            );
-            foreach ($typedIn as $row) {
-                $results[] = [
-                    'targetUri' => $row['sourceUri'],
-                    'relType' => $row['relType'] . '_INBOUND',
-                    'isDirect' => false,
+                    'relType'   => $row['relType'] . '_INBOUND',
+                    'isDirect'  => false,
                 ];
             }
         } catch (\Exception $e) {
@@ -340,11 +319,26 @@ class Neo4jService implements LoggerAwareInterface
             return [];
         }
 
-        // Deduplicate by target URI — prefer typed (more informative) over direct
+        // Deduplicate by target URI. Prefer outbound (more specific direction)
+        // over inbound when both exist; prefer a typed relation over generic "related".
         $seen = [];
         foreach ($results as $r) {
             $key = $r['targetUri'];
-            if (!isset($seen[$key]) || (!$r['isDirect'] && $seen[$key]['isDirect'])) {
+            $isInbound = str_ends_with($r['relType'], '_INBOUND');
+            $isGeneric = str_starts_with($r['relType'], 'related');
+            if (!isset($seen[$key])) {
+                $seen[$key] = $r;
+                continue;
+            }
+            $existing = $seen[$key];
+            $existingInbound = str_ends_with($existing['relType'], '_INBOUND');
+            $existingGeneric = str_starts_with($existing['relType'], 'related');
+            // Prefer typed over generic; then prefer outbound over inbound.
+            if ($existingGeneric && !$isGeneric) {
+                $seen[$key] = $r;
+            } elseif (!$existingGeneric && $isGeneric) {
+                continue;
+            } elseif ($existingInbound && !$isInbound) {
                 $seen[$key] = $r;
             }
         }
@@ -383,9 +377,11 @@ class Neo4jService implements LoggerAwareInterface
 
         try {
             $rows = $this->runQuery(
-                'MATCH (:ns0__Hub)-[:ns1__relationship]->(rel:ns1__Relationship)-[:ns1__relation]->(rt)
-                 WHERE NOT rt.uri STARTS WITH "bnode"
-                 RETURN replace(rt.uri, "http://id.loc.gov/entities/relationships/", "") AS relType,
+                'MATCH (rel:ns0__Relation)-[:ns0__relationship]->(rt)
+                 WHERE rt.uri IS NOT NULL AND NOT rt.uri STARTS WITH "bnode"
+                 RETURN replace(replace(rt.uri,
+                            "http://id.loc.gov/vocabulary/relationship/", ""),
+                            "http://id.loc.gov/entities/relationships/", "") AS relType,
                         count(*) AS freq',
                 []
             );

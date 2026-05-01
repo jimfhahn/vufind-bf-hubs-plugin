@@ -96,18 +96,8 @@ class BibframeHub implements RelatedInterface
         // Save the original URI from resolution for fallback
         $originalUri = $this->hubUri;
 
-        // Reconciliation fast-path: if the resolved Hub is known-stale and we
-        // have a canonical, swap it in before fetching RDF. Avoids the slow
-        // suggest2 → base-work detour for legacy MARC records whose Neo4j-
-        // sourced URI 404s on id.loc.gov.
-        $reconciled = $this->neo4j->getHubsBulk([$this->hubUri]);
-        $reconciledCanonical = $reconciled[$this->hubUri]['canonical_uri'] ?? null;
-        if ($reconciledCanonical && $reconciledCanonical !== $this->hubUri) {
-            $this->hubUri = $reconciledCanonical;
-        }
-
         // Step 2: Try live RDF from id.loc.gov first (current data, valid URIs),
-        // fall back to Neo4j graph (stale but always available)
+        // fall back to Neo4j graph
         $scored = $this->fetchAndScoreViaRdf($this->hubUri);
 
         // If RDF failed, try suggest2 for a current URI
@@ -141,11 +131,7 @@ class BibframeHub implements RelatedInterface
             $scored = $this->fetchAndScoreViaNeo4j($originalUri);
             $this->resultsFromNeo4j = !empty($scored);
             if ($this->resultsFromNeo4j) {
-                // Prefer the reconciled canonical URI for the primary Hub
-                // when the bulk-TTL URI is stale on id.loc.gov.
-                $bulk = $this->neo4j->getHubsBulk([$originalUri]);
-                $canonical = $bulk[$originalUri]['canonical_uri'] ?? null;
-                $this->hubUri = $canonical ?: $originalUri;
+                $this->hubUri = $originalUri;
             }
         }
 
@@ -318,44 +304,13 @@ class BibframeHub implements RelatedInterface
         $frequencies = $this->neo4j->getRelationshipTypeFrequencies();
 
         // Batch-fetch title/agents/media for every related Hub in one Cypher
-        // round-trip. Includes reconciliation metadata (canonical_uri,
-        // upstream_status) populated by tools/reconcile/reconcile_hubs.py.
-        $originalUris = array_column($relatedHubs, 'targetUri');
-        $bulk = $this->neo4j->getHubsBulk($originalUris);
-
-        // Apply reconciliation: rewrite targetUri to canonical_uri when the
-        // original Hub URI is stale (404 on id.loc.gov) but a current
-        // canonical was discovered. The canonical Hub typically isn't in
-        // our Neo4j snapshot yet, so we keep the *original* Hub's
-        // title/agents/media for scoring & display and only swap the URI
-        // (which is what gets HEAD-validated and linked).
-        // Drop relationships whose target is confirmed gone with no recovery —
-        // HEAD-validating them later would just waste time.
-        $rewritten = [];
-        foreach ($relatedHubs as $rel) {
-            $orig = $rel['targetUri'];
-            $row = $bulk[$orig] ?? null;
-            $status = $row['upstream_status'] ?? null;
-            $canonical = $row['canonical_uri'] ?? null;
-
-            if ($status === 'gone' && !$canonical) {
-                continue; // confirmed dead, no recovery — skip
-            }
-            if ($canonical && $canonical !== $orig) {
-                $rel['targetUri'] = $canonical;
-                // Mirror the original's enrichment under the canonical key
-                // so the scorer's bulk-keyed callbacks still find data.
-                if ($row && !isset($bulk[$canonical])) {
-                    $bulk[$canonical] = $row;
-                }
-            }
-            $rewritten[] = $rel;
-        }
+        // round-trip — avoids per-Hub round-trips inside the scoring loop.
+        $bulk = $this->neo4j->getHubsBulk(array_column($relatedHubs, 'targetUri'));
 
         return $this->scorer->scoreRelatedHubs(
             $sourceAgents,
             $sourceMedia,
-            $rewritten,
+            $relatedHubs,
             $frequencies,
             fn(string $uri) => $bulk[$uri]['title']  ?? null,
             fn(string $uri) => $bulk[$uri]['agents'] ?? [],

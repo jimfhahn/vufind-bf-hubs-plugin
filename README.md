@@ -1,13 +1,10 @@
 # VuFind BIBFRAME Hub Plugin
 
-> **Status: Research in progress (April 2026).** This plugin works end-to-end on
-> the bundled demo records and against modern MARC records that carry a Hub URI
-> in 240/130 `$1`. The Neo4j back-end is **not yet comprehensive** — it covers
-> roughly 17% of the live `id.loc.gov` Hub population after Phase 1 reconciliation,
-> with Phase 2 (activity-stream ingest) currently in progress. The plugin
-> degrades gracefully on partial coverage, but production deployments should
-> expect ongoing graph-completeness work. See
-> [Graph Back-End: Current State and Roadmap](#graph-back-end-current-state-and-roadmap).
+> **Status: Working end-to-end (May 2026).** This plugin runs against the
+> 2026-04-30 LC BIBFRAME Hubs bulk dump (~2.89M Hub nodes, ~99% of LC's
+> live Hub population). Earlier reconciliation tooling (graph-coverage
+> sweeps, label-recovery, activity-stream crawler) has been retired now
+> that the upstream snapshot is current.
 
 A VuFind plugin that surfaces **surprising, non-obvious work relationships** using Library of Congress BIBFRAME Hubs. Instead of showing the predictable (translations, series membership), the plugin prioritizes creative transformations, cross-medium adaptations, and unexpected connections between works.
 
@@ -29,7 +26,7 @@ VuFind will be available at **http://localhost:4567/vufind/**. Four test records
 
 The Docker setup includes VuFind (PHP 8.3 + Apache), MariaDB, and embedded Solr. Neo4j runs on the host and is accessed via `host.docker.internal`.
 
-> **Note on the graph back-end:** at runtime the plugin's *primary* data path is **live RDF/XML from `id.loc.gov`** for whichever Hub the record resolves to. Neo4j is used as a fallback (when the live RDF is empty or unreachable) and as a metadata cache for related-Hub titles, agents, and media types during scoring. The full bulk-imported graph is **not strictly required** to run the plugin against modern MARC records that carry a Hub URI in 240/130 `$1`; it becomes important for legacy records that depend on title/LCCN lookup, and for fully-populated scoring of related Hubs. See [Graph Back-End: Current State and Roadmap](#graph-back-end-current-state-and-roadmap) for the coverage picture and the planned closure path.
+> **Note on the graph back-end:** at runtime the plugin's *primary* data path is **live RDF/XML from `id.loc.gov`** for whichever Hub the record resolves to. Neo4j is used as a fallback (when the live RDF is empty or unreachable) and as a metadata cache for related-Hub titles, agents, and media types during scoring. The full bulk-imported graph is **not strictly required** to run the plugin against modern MARC records that carry a Hub URI in 240/130 `$1`; it becomes important for legacy records that depend on title/LCCN lookup, and for fully-populated scoring of related Hubs.
 
 ## Installing into an Existing VuFind
 
@@ -150,7 +147,7 @@ curl -L -o data/hubs.bibframe.ttl.gz \
 gunzip data/hubs.bibframe.ttl.gz
 ```
 
-This is ~570MB compressed, ~4.3GB decompressed.
+This is ~700MB compressed, ~5.4GB decompressed.
 
 ### 3. Configure n10s and import
 
@@ -161,10 +158,16 @@ CALL n10s.graphconfig.init({handleVocabUris: "SHORTEN"});
 CREATE CONSTRAINT n10s_unique_uri FOR (r:Resource) REQUIRE r.uri IS UNIQUE;
 ```
 
-Import the dataset (~20 minutes):
+Import the dataset (~30–60 minutes; pass `verifyUriSyntax: false` because
+the bulk file contains a handful of non-conformant URIs that would otherwise
+abort the load):
 
 ```cypher
-CALL n10s.rdf.import.fetch("file:///import/hubs.bibframe.ttl", "Turtle", {commitSize: 25000});
+CALL n10s.rdf.import.fetch(
+  "file:///import/hubs.bibframe.ttl",
+  "Turtle",
+  {commitSize: 25000, verifyUriSyntax: false}
+);
 ```
 
 ### 4. Create indexes
@@ -174,31 +177,26 @@ CREATE INDEX hub_uri FOR (h:ns0__Hub) ON (h.uri);
 CREATE FULLTEXT INDEX hub_title_ft FOR (t:ns0__Title) ON EACH [t.ns0__mainTitle];
 ```
 
-The loaded graph contains **~2.65M Hub nodes**, 28.8M total nodes, and 117.5M triples. Upstream `id.loc.gov` currently reports **~2.93M live Hubs**, so the bulk TTL snapshot lags by ~11% on its face — and after Phase 1 reconciliation only ~495K of the local Hubs are *actually* resolvable to live upstream URIs (the rest are legacy work-as-Hub artifacts from a prior LC modeling pipeline). See [Graph Back-End: Current State and Roadmap](#graph-back-end-current-state-and-roadmap) below and [docs/follow-on-activity-streams-coverage.md](docs/follow-on-activity-streams-coverage.md) for the planned closure.
+The loaded graph from the 2026-04-30 LC bulk export contains
+**~2.89M Hub nodes**, ~37M total nodes, ~69M relationships,
+and ~152M triples — close to LC's reported live Hub population
+(~2.93M, ~99% coverage).
 
-## Graph Back-End: Current State and Roadmap
+## Graph Back-End
 
-The Neo4j graph is a *cache* layered on top of `id.loc.gov`, not a source of truth. Three things are worth understanding before relying on it for production:
+The Neo4j graph is a *cache* layered on top of `id.loc.gov`, not a source of
+truth. At runtime the plugin's primary data path is live RDF from
+`id.loc.gov/{hubUri}.rdf`; Neo4j is consulted for:
 
-1. **Bulk import is a one-shot snapshot.** LC publishes the BIBFRAME Hubs dataset as periodic TTL bulk downloads. We loaded the available snapshot via `n10s` (~2.65M Hub nodes). There is no fresher bulk export.
-2. **Reconciliation is a continuous concern.** Hub URIs drift: they get re-minted, merged, and deprecated on `id.loc.gov` constantly. [`tools/reconcile/`](tools/reconcile/README.md) HEAD-checks every Hub and recovers canonical URIs via the LC label endpoint. Post-reconciliation status (verified 2026-04-25):
+- Legacy MARC title/LCCN → Hub URI resolution
+- Related-Hub metadata enrichment (titles, agents, media types) during scoring
+- Relationship-type frequency statistics for the rarity bonus (24h cached)
+- Fallback relationship traversal when live RDF is empty/unreachable
 
-   | `upstream_status` | Count | Meaning |
-   |---|---|---|
-   | `redirect` (with `canonical_uri`) | ~495K | Old URI → live canonical (recoverable) |
-   | `live`/self-redirect | ~92 | Verified currently-live |
-   | `gone` (no recovery) | ~2.1M | Legacy work-as-Hub URIs from a prior LC modeling pipeline; not Hubs under the current ontology |
-   | NULL (bnodes) | ~49K | Not real Hubs |
-
-   **Effective coverage of live upstream Hubs: ~17%** (495K resolvable / ~2.93M live).
-
-3. **The path to comprehensive coverage is the LC Activity Streams feed.** [`tools/coverage/activity_stream_crawler.py`](tools/coverage/activity_stream_crawler.py) walks the `https://id.loc.gov/resources/hubs/activitystreams/feed/` pages and emits one JSONL line per Hub event. The diff between that enumeration and our local graph yields the ~330K+ Hubs we need to ingest to close the gap. Crawl progress is checkpoint-resumable; failed pages are written to `output/failed-pages.txt` and can be retried with `--sweep-failed`. See [docs/follow-on-activity-streams-coverage.md](docs/follow-on-activity-streams-coverage.md) for the full plan (crawl → diff → fetch missing `.nt` → `n10s.rdf.import.fetch` → re-reconcile → ontological relabel of legacy Hubs).
-
-**What this means for the plugin runtime:**
-
-- The live RDF fast lane (id.loc.gov `{hubUri}.rdf`) is unaffected by graph completeness — modern MARC records with Hub URIs in 240/130 `$1` work end-to-end without ever touching Neo4j for hub resolution.
-- Neo4j is consulted for: legacy MARC title/LCCN lookup, related-Hub metadata enrichment during scoring, and relationship-frequency statistics (24h cached).
-- The plugin already substitutes `canonical_uri` for `redirect` Hubs and silently drops `gone` Hubs with no recovery, so the partial coverage degrades gracefully rather than producing broken links.
+The LC bulk dump is published periodically; refresh by re-running the import
+above and clearing the plugin's caches
+(`bibframehub_rel_frequencies.json`, `bibframehub_empty_rdf.json`,
+`bibframehub_uri_validation.json` in the VuFind `local/cache/` directory).
 
 ## Design Principle
 
@@ -216,7 +214,7 @@ A patron viewing *Pride and Prejudice* should see *Death Comes to Pemberley* (P.
    - **Legacy**: LCCN → Neo4j lookup → title search → LC suggest2 API
 2. **RDF-first**: Fetch live RDF/XML from `id.loc.gov/{hubUri}.rdf` → parse typed relationships.
 3. **Base-work recovery**: If the resolved Hub has no relationships (e.g. suggest2 returned a collected-works edition), strip AAP qualifiers and look up the canonical base work via the label endpoint.
-4. **Neo4j fallback**: If RDF is unavailable for all candidate URIs, query the graph for all Hub-to-Hub relationships (direct edges + typed `bflc:relationship` links).
+4. **Neo4j fallback**: If RDF is unavailable for all candidate URIs, query the graph using the reified relation pattern `(:Hub)-[:relation]->(:Relation)-[:associatedResource]->(:Hub)` (traversed both directions; relationship type read from the `bf:Relation`'s `bf:relationship` URI).
 5. **Surprise scoring**: Score each related Hub on a 0–100 scale using four signals.
 6. **Display**: Render grouped results in a collapsible tree in the record sidebar.
 
@@ -290,37 +288,38 @@ Based on `rdf:type` on Hub nodes: `MovingImage`, `Audio`, `NotatedMusic`, `Multi
 
 ### Setup
 
+See [Neo4j Setup](#neo4j-setup) above for the full bootstrap. Quick recap:
+
 ```bash
-# Pull and run Neo4j with n10s plugin
 docker run -d --name neo4j-hubs \
   -p 7474:7474 -p 7687:7687 \
   -e NEO4J_AUTH=neo4j/bibframe123 \
   -e NEO4J_PLUGINS='["n10s"]' \
   -v $(pwd)/data:/import \
   neo4j:5.26
-
-# Configure n10s
-# (via Neo4j browser at localhost:7474)
-CALL n10s.graphconfig.init({handleVocabUris: "SHORTEN"});
-CREATE CONSTRAINT n10s_unique_uri FOR (r:Resource) REQUIRE r.uri IS UNIQUE;
-
-# Import the full dataset (~20 min)
-CALL n10s.rdf.import.fetch("file:///import/hubs.bibframe.ttl", "Turtle", {commitSize: 25000});
-
-# Create Hub index for fast lookups
-CREATE INDEX hub_uri FOR (h:ns0__Hub) ON (h.uri);
 ```
 
-### Graph Statistics
+```cypher
+CALL n10s.graphconfig.init({handleVocabUris: "SHORTEN"});
+CREATE CONSTRAINT n10s_unique_uri FOR (r:Resource) REQUIRE r.uri IS UNIQUE;
+CALL n10s.rdf.import.fetch(
+  "file:///import/hubs.bibframe.ttl", "Turtle",
+  {commitSize: 25000, verifyUriSyntax: false}
+);
+CREATE INDEX hub_uri FOR (h:ns0__Hub) ON (h.uri);
+CREATE FULLTEXT INDEX hub_title_ft FOR (t:ns0__Title) ON EACH [t.ns0__mainTitle];
+```
+
+### Graph Statistics (2026-04-30 LC bulk dump)
 
 | Metric | Value |
 |--------|-------|
-| Total triples | 117.5M |
-| Total nodes | 28.8M |
-| Hub nodes (`ns0__Hub`) | ~2.65M |
-| Title nodes | 2.65M |
-| Contribution nodes | 2.09M |
-| LCCN nodes | 1.56M |
+| Total triples | ~152M |
+| Total nodes | ~37.3M |
+| Total relationships | ~69.1M |
+| Hub nodes (`ns0__Hub`) | ~2.89M |
+| `bf:Relation` reification nodes | ~548K |
+| Hub→Hub relations (typed via `bf:Relation`) | ~533K (`associatedResource` targeting Hubs) |
 
 ### Schema (n10s namespace mapping)
 
@@ -328,47 +327,41 @@ CREATE INDEX hub_uri FOR (h:ns0__Hub) ON (h.uri);
 |--------|----------|
 | `ns0` | `http://id.loc.gov/ontologies/bibframe/` |
 | `ns1` | `http://id.loc.gov/ontologies/bflc/` |
-| `ns2` | `http://id.loc.gov/vocabulary/mnotetype/` |
 | `ns3` | `http://purl.org/dc/terms/` |
 
-### Key Relationships Between Hubs
+### How relationships are modeled
 
-**Direct Hub→Hub edges** (bidirectional totals, verified 2026-04-25):
+The 2026-04-30 bulk dump uses a uniform reified pattern — there are
+**no direct `bf:translationOf`/`bf:relatedTo`/`bf:arrangementOf` edges
+between Hubs**, and the older `bflc:Relationship` chain is gone too.
+Every relationship is a `bf:Relation` blank node:
 
-| Edge Type | Count | Notes |
-|-----------|-------|-------|
-| `ns0__translationOf` | 941K | Hub → Hub |
-| `ns0__relatedTo` | 159K | Generic relation |
-| `ns0__arrangementOf` | ~23K | Musical arrangements |
+```
+(source:Hub)-[:ns0__relation]->(:ns0__Relation)-[:ns0__associatedResource]->(target:Hub)
+                                          \-[:ns0__relationship]->(rt:Resource)
+```
 
-These are the only edges that produce sibling `:ns0__Hub` nodes during graph traversal.
+The relation is recorded only on the source side, so the plugin
+traverses both outbound and inbound to discover all neighbors.
 
-**Typed relationships** (via `bflc:relationship` → `bflc:Relationship` → `bflc:relation`):
+Relationship-type URIs come in two prefix flavors which the plugin
+strips uniformly:
 
-~138K typed instances using ~100 relationship types from `http://id.loc.gov/entities/relationships/`. Top types:
+- `http://id.loc.gov/vocabulary/relationship/{type}` (~548K, the bulk of the dump)
+- `http://id.loc.gov/entities/relationships/{type}` (~60K, the older typed set)
 
-| Type | Count | Tier |
-|------|-------|------|
-| translator | 21,330 | 5 |
-| editor | 9,783 | 5 |
-| inseries | 8,252 | 5 |
-| containerof / containedin | 6K each | 5 |
-| filmdirector | 2,744 | 5 |
-| basedon | 1,652 | 3 |
-| continuedby | 1,376 | 4 |
-| motionpictureadaptationof | 879 | 2 |
-| adaptedasmotionpicture | 568 | 2 |
-| librettofor | 467 | 2 |
-| derivative | 432 | 1 |
-| sequel / sequelto | 273 / 318 | 3 |
-| variationsbasedon | 218 | 2 |
-| operaadaptationof | 214 | 2 |
-| parodyof | 36 | 1 |
-| inspirationfor | 33 | 1 |
-| graphicnovelizationof | 41 | 1 |
-| novelizationof | 19 | 1 |
+A small population of bnode-typed relations (~22K) is skipped during
+scoring.
 
-> **Caveat (verified 2026-04-25):** zero of the typed-relationship `relation` targets in our graph carry a Hub URI — they are work/instance URIs not represented as `:ns0__Hub` nodes. These typed edges contribute relationship-type metadata for scoring, but they do not produce additional Hub→Hub neighbors during graph traversal. See [docs/neo4j-graph-topology.md](docs/neo4j-graph-topology.md).
+### Top relationship types
+
+Sampled from the live aggregation cached in
+`bibframehub_rel_frequencies.json` after first run.
+Distribution shifts somewhat from the previous snapshot — `relatedwork`
+and `translationof` dominate, with cross-medium adaptations
+(`operaadaptationof`, `motionpictureadaptationof`, `televisionadaptationof`)
+and creative transformations (`inspirationfor`, `parodyof`, `derivative`)
+in the long tail that drives the surprise score.
 
 ### How Data is Stored
 
@@ -386,18 +379,25 @@ MATCH (h:ns0__Hub)-[:ns0__title]->(t)
 WHERE any(mt IN t.ns0__mainTitle WHERE toLower(mt) CONTAINS "pride and prejudice")
 RETURN DISTINCT h.uri
 
--- Get all typed relationships for a Hub
-MATCH (h:ns0__Hub)-[:ns1__relationship]->(rel:ns1__Relationship)-[:ns1__relation]->(rt)
-WHERE h.uri = $hubUri AND NOT rt.uri STARTS WITH 'bnode'
-MATCH (rel)-[:ns0__relatedTo]->(target:ns0__Hub)
+-- Get all Hub→Hub relations (outbound) for a Hub, with type
+MATCH (h:ns0__Hub {uri: $hubUri})-[:ns0__relation]->(rel:ns0__Relation)
+  -[:ns0__associatedResource]->(target:ns0__Hub)
+OPTIONAL MATCH (rel)-[:ns0__relationship]->(rt)
 OPTIONAL MATCH (target)-[:ns0__title]->(tt)
-RETURN replace(rt.uri, 'http://id.loc.gov/entities/relationships/', '') AS relType,
+RETURN replace(replace(coalesce(rt.uri, "related"),
+         "http://id.loc.gov/vocabulary/relationship/", ""),
+         "http://id.loc.gov/entities/relationships/", "") AS relType,
        target.uri, tt.ns0__mainTitle[0] AS targetTitle
 
--- Get direct Hub→Hub edges
-MATCH (h:ns0__Hub)-[r]->(target:ns0__Hub)
-WHERE h.uri = $hubUri
-RETURN type(r) AS edgeType, target.uri
+-- Inbound relations (the same Hub seen from neighbors that point to it)
+MATCH (h:ns0__Hub {uri: $hubUri})<-[:ns0__associatedResource]-(rel:ns0__Relation)
+  <-[:ns0__relation]-(source:ns0__Hub)
+OPTIONAL MATCH (rel)-[:ns0__relationship]->(rt)
+RETURN replace(replace(coalesce(rt.uri, "related"),
+         "http://id.loc.gov/vocabulary/relationship/", ""),
+         "http://id.loc.gov/entities/relationships/", "") AS relType,
+       source.uri
+```
 
 -- Check medium type for a Hub
 MATCH (h:ns0__Hub)-[:rdf__type]->(t)
@@ -453,34 +453,22 @@ vufind-bf-hubs-plugin/
 │   └── modern-marc-hub-discovery.md   ← Modern MARC field analysis + findings
 ├── docker-compose.yml                 ← Docker dev environment
 ├── docker/                            ← Dockerfile + entrypoint + config overrides
-├── tools/
-│   ├── reconcile/                     ← Hub URI reconciliation against id.loc.gov (Phase 1, complete)
-│   └── coverage/                      ← Activity-stream crawler for comprehensive Hub coverage (Phase 2, in progress)
 └── tests/                             ← scoring tests
 ```
 
-## Hub Reconciliation
+## Refreshing the Graph
 
-The bulk-loaded BIBFRAME TTL snapshot drifts from `id.loc.gov` over time:
-URIs get re-minted, hubs get merged, edges go stale. Records that resolve to
-those legacy URIs would render zero results without intervention.
+The LC bulk dump is published periodically. To refresh:
 
-[`tools/reconcile/`](tools/reconcile/README.md) provides a Python script that:
+1. Re-download `hubs.bibframe.ttl.gz` and decompress.
+2. Stop the existing `neo4j-hubs` container, delete its volume, re-create it.
+3. Re-run the n10s init + import + index commands from [Neo4j Setup](#neo4j-setup).
+4. Clear the plugin caches inside the VuFind container:
+   `rm /vufind-local/cache/bibframehub_*.json`.
 
-1. HEAD-checks `(:ns0__Hub)` URIs against `id.loc.gov` (live → redirect → gone).
-2. For `gone` Hubs, calls the LC label endpoint with `"{agent}. {title}"`
-   candidates derived from the graph itself.
-3. Verifies any recovered canonical URI actually carries `bf:relation` data
-   before accepting it.
-4. Writes `upstream_status` / `canonical_uri` / `last_verified` back to each Hub.
-
-The plugin reads those properties at query time and substitutes the
-canonical URI in display links. Records whose original Hub URI is
-confirmed dead with no recovery are dropped silently rather than rendered
-as un-clickable text.
-
-Empirical recovery rate on the demo records: **~75 %** of stale Hub URIs
-resolve to a current canonical with verified relationships.
+No separate reconciliation step is required — LC's published snapshot now
+tracks live `id.loc.gov` closely (~99% coverage as of the 2026-04-30 dump),
+so stale-URI handling is no longer a runtime concern.
 
 ## Configuration Reference
 
@@ -507,8 +495,6 @@ maxDisplayResults = 15              ; Max related works to show
 
 ## Roadmap
 
-- **Comprehensive Hub coverage via Activity Streams.** Finish the [activity-stream crawl](tools/coverage/activity_stream_crawler.py) (currently ~30% complete; resumable) → diff against the graph → ingest the ~330K+ missing Hubs via `n10s.rdf.import.fetch` → re-run reconciliation. End state: a graph that mirrors live `id.loc.gov` rather than a stale snapshot. See [docs/follow-on-activity-streams-coverage.md](docs/follow-on-activity-streams-coverage.md).
-- **Ontological cleanup of legacy Hubs.** After the ingest above, relabel the ~2.1M `gone`-with-no-recovery nodes from `:ns0__Hub` to `:ns0__Work` + `:LegacyHubWork` so the local schema honestly reflects LC's current Hub modeling. See `docs/follow-on-bibframe-hub-graph.md`.
 - **758 Work→Hub traversal**: Use 758 Work URIs to discover Hubs via HEAD request (`x-preflabel` header) → label endpoint (302 redirect). A second fast lane for records that have 758 but not 240 `$1`.
 - **Authority-based author scoring**: Use 100/700 `$0`/`$1` Name Authority URIs for precise author-distance calculations without Neo4j agent lookups.
 - **Broader identifier-based Hub lookup**: ISBNs and other identifiers (not just title/LCCN) for more reliable MARC-to-Hub resolution.
