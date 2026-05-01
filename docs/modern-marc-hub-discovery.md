@@ -214,8 +214,8 @@ first path that yields a HEAD-validated Hub URI:
 Paths 1, 2, and 4 are not currently dispatched at the MARC layer — the
 plugin defers to id.loc.gov's label endpoint via `HubClient::lookupByLabel()`,
 which accepts any AAP form. The provenance distinction matters more for
-upstream tooling (see `marc2bibframe2-issue-friendly.md`) than for the
-plugin's own resolution logic.
+upstream tooling (see [lcnetdev/marc2bibframe2#270](https://github.com/lcnetdev/marc2bibframe2/issues/270))
+than for the plugin's own resolution logic.
 
 ## BIBFRAME Entity Model (as observed)
 

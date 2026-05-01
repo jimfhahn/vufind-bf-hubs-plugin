@@ -146,9 +146,9 @@ which template fired for each Hub element; downstream consumers
 don't. By the time a reconciler sees the BIBFRAME output, that
 provenance information has been discarded.
 
-A draft proposal for `marc2bibframe2` (see
-[the issue draft files in the heng-et-al-2026 workspace folder](../../heng-et-al-2026/marc2bibframe2-issue-friendly.md))
-would have the converter emit a `bflc:hubMatchKey` property on
+This proposal has been filed upstream as
+[lcnetdev/marc2bibframe2#270](https://github.com/lcnetdev/marc2bibframe2/issues/270):
+have the converter emit a `bflc:hubMatchKey` property on
 each generated Hub, formatted as the AAP that the label endpoint
 accepts. With that key in place, any downstream system could
 resolve canonical URIs at no additional cost — including, in

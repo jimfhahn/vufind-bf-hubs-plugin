@@ -450,10 +450,15 @@ vufind-bf-hubs-plugin/
 │   ├── templates/Related/BibframeHub.phtml  ← sidebar panel template
 │   └── theme.config.php
 ├── docs/
-│   └── modern-marc-hub-discovery.md   ← Modern MARC field analysis + findings
-├── docker-compose.yml                 ← Docker dev environment
-├── docker/                            ← Dockerfile + entrypoint + config overrides
-└── tests/                             ← scoring tests
+│   ├── modern-marc-hub-discovery.md   ← Modern MARC field analysis + findings
+│   ├── neo4j-graph-topology.md        ← Cypher schema reference for the bulk graph
+│   └── related-work-heng-et-al.md     ← Methodology / related research notes
+├── docker-compose.yml                 ← Docker dev environment (vufind + db)
+├── docker/                            ← Dockerfile, entrypoint, VuFind config overrides
+├── data/                              ← Local bulk-dump landing zone (gitignored)
+├── tests/                             ← Scoring tests (PHP + Python prototype)
+├── composer.json                      ← PSR-4 autoload for the BibframeHub module
+└── vufind-plugin.code-workspace       ← Multi-root VS Code workspace
 ```
 
 ## Refreshing the Graph
