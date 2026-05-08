@@ -1,6 +1,8 @@
 # Bulk data files (download from id.loc.gov)
 data/hubs.bibframe.ttl
 data/hubs.bibframe.ttl.gz
+data/hubs.bibframe-*.ttl
+data/hubs.bibframe-*.ttl.gz
 
 # Docker runtime
 docker/local/cache/

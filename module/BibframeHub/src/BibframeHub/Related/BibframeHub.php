@@ -125,13 +125,24 @@ class BibframeHub implements RelatedInterface
             }
         }
 
-        // Final fallback: Neo4j graph using the ORIGINAL URI
-        // (suggest2 may have returned a different hub with no relationships)
+        // Final fallback: Neo4j graph. Try every candidate URI we have
+        // collected so far — the original (Neo4j title match) might be a
+        // weak fulltext hit (e.g. "Hamlet" → "Hamlet versus Hamlet") while
+        // the suggest2 URI is the canonical Hub. Conversely, a suggest2
+        // hub may not exist in the local graph yet. Try both, prefer the
+        // one that actually returns related Hubs.
         if (empty($scored)) {
-            $scored = $this->fetchAndScoreViaNeo4j($originalUri);
-            $this->resultsFromNeo4j = !empty($scored);
-            if ($this->resultsFromNeo4j) {
-                $this->hubUri = $originalUri;
+            $candidates = array_values(array_unique(array_filter([
+                $this->hubUri,
+                $originalUri,
+            ])));
+            foreach ($candidates as $candidate) {
+                $scored = $this->fetchAndScoreViaNeo4j($candidate);
+                if (!empty($scored)) {
+                    $this->resultsFromNeo4j = true;
+                    $this->hubUri = $candidate;
+                    break;
+                }
             }
         }
 

@@ -1,7 +1,7 @@
 # VuFind BIBFRAME Hub Plugin
 
 > **Status: Working end-to-end (May 2026).** This plugin runs against the
-> 2026-04-30 LC BIBFRAME Hubs bulk dump (~2.89M Hub nodes, ~99% of LC's
+> 2026-05-05 LC BIBFRAME Hubs bulk dump (~2.91M Hub nodes, ~99% of LC's
 > live Hub population). Earlier reconciliation tooling (graph-coverage
 > sweeps, label-recovery, activity-stream crawler) has been retired now
 > that the upstream snapshot is current.
@@ -177,10 +177,18 @@ CREATE INDEX hub_uri FOR (h:ns0__Hub) ON (h.uri);
 CREATE FULLTEXT INDEX hub_title_ft FOR (t:ns0__Title) ON EACH [t.ns0__mainTitle];
 ```
 
-The loaded graph from the 2026-04-30 LC bulk export contains
-**~2.89M Hub nodes**, ~37M total nodes, ~69M relationships,
-and ~152M triples — close to LC's reported live Hub population
-(~2.93M, ~99% coverage).
+The loaded graph from the 2026-05-05 LC bulk export contains
+**~2.91M Hub nodes**, ~37.1M total nodes, ~68.8M relationships,
+and ~152.6M triples — close to LC's reported live Hub population
+(~2.93M, ~99% coverage). The schema is unchanged from the
+2026-04-30 dump.
+
+> **Heads up — the published manifest sha1 may not match the file you
+> download** (we observed this on the 2026-05-05 dump). The TTL is still
+> intact and gunzips cleanly; the hash is just stale. The TTL also still
+> contains a handful of non-conformant URIs (e.g. unencoded `[` in
+> `https://portal.issn.org/api/search?search[]=...`), so the
+> `verifyUriSyntax: false` flag above remains required.
 
 ## Graph Back-End
 
@@ -310,16 +318,16 @@ CREATE INDEX hub_uri FOR (h:ns0__Hub) ON (h.uri);
 CREATE FULLTEXT INDEX hub_title_ft FOR (t:ns0__Title) ON EACH [t.ns0__mainTitle];
 ```
 
-### Graph Statistics (2026-04-30 LC bulk dump)
+### Graph Statistics (2026-05-05 LC bulk dump)
 
 | Metric | Value |
 |--------|-------|
-| Total triples | ~152M |
-| Total nodes | ~37.3M |
-| Total relationships | ~69.1M |
-| Hub nodes (`ns0__Hub`) | ~2.89M |
-| `bf:Relation` reification nodes | ~548K |
-| Hub→Hub relations (typed via `bf:Relation`) | ~533K (`associatedResource` targeting Hubs) |
+| Total triples | ~152.6M |
+| Total nodes | ~37.1M |
+| Total relationships | ~68.8M |
+| Hub nodes (`ns0__Hub`) | ~2.91M |
+| `bf:Relation` reification nodes | ~544K |
+| Hub→Hub relations (typed via `bf:Relation`) | ~532K (`associatedResource` targeting Hubs) |
 
 ### Schema (n10s namespace mapping)
 
@@ -331,7 +339,7 @@ CREATE FULLTEXT INDEX hub_title_ft FOR (t:ns0__Title) ON EACH [t.ns0__mainTitle]
 
 ### How relationships are modeled
 
-The 2026-04-30 bulk dump uses a uniform reified pattern — there are
+The 2026-05-05 bulk dump uses a uniform reified pattern — there are
 **no direct `bf:translationOf`/`bf:relatedTo`/`bf:arrangementOf` edges
 between Hubs**, and the older `bflc:Relationship` chain is gone too.
 Every relationship is a `bf:Relation` blank node:
@@ -472,7 +480,7 @@ The LC bulk dump is published periodically. To refresh:
    `rm /vufind-local/cache/bibframehub_*.json`.
 
 No separate reconciliation step is required — LC's published snapshot now
-tracks live `id.loc.gov` closely (~99% coverage as of the 2026-04-30 dump),
+tracks live `id.loc.gov` closely (~99% coverage as of the 2026-05-05 dump),
 so stale-URI handling is no longer a runtime concern.
 
 ## Configuration Reference

@@ -133,10 +133,14 @@ class Neo4jService implements LoggerAwareInterface
         }
 
         try {
+            // n10s stores ns0__mainTitle as STRING when single-valued and
+            // LIST<STRING> when multi-valued. Normalize to a single string.
             $rows = $this->runQuery(
                 'MATCH (h:ns0__Hub)-[:ns0__title]->(t)
                  WHERE h.uri = $uri
-                 RETURN t.ns0__mainTitle[0] AS title
+                 RETURN CASE WHEN valueType(t.ns0__mainTitle) STARTS WITH "LIST"
+                             THEN t.ns0__mainTitle[0]
+                             ELSE t.ns0__mainTitle END AS title
                  LIMIT 1',
                 ['uri' => $hubUri]
             );
@@ -215,14 +219,23 @@ class Neo4jService implements LoggerAwareInterface
         $uris = array_values(array_unique(array_filter($hubUris)));
 
         try {
+            // n10s stores ns0__mainTitle as STRING when single-valued and
+            // LIST<STRING> when multi-valued. Normalize per-row before collecting.
             $rows = $this->runQuery(
                 'UNWIND $uris AS uri
                  MATCH (h:ns0__Hub {uri: uri})
                  OPTIONAL MATCH (h)-[:ns0__title]->(t)
+                 WITH h, t
+                 WITH h, CASE
+                          WHEN t IS NULL THEN NULL
+                          WHEN valueType(t.ns0__mainTitle) STARTS WITH "LIST"
+                            THEN t.ns0__mainTitle[0]
+                          ELSE t.ns0__mainTitle
+                        END AS titleVal
                  OPTIONAL MATCH (h)-[:ns0__contribution]->(c)-[:ns0__agent]->(a)
                  OPTIONAL MATCH (h)-[:rdf__type]->(tp)
                  RETURN h.uri AS uri,
-                        head(collect(DISTINCT t.ns0__mainTitle[0])) AS title,
+                        head(collect(DISTINCT titleVal)) AS title,
                         collect(DISTINCT a.uri) AS agents,
                         collect(DISTINCT tp.uri) AS media',
                 ['uris' => $uris]
