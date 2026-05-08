@@ -12,7 +12,7 @@ A VuFind plugin module (`BibframeHub`) that shows **related works** in the recor
 
 The plugin is **fully operational** in Docker. VuFind at `http://localhost:4567/vufind/` with test records (P&P, Hamlet, Gatsby, Palinuro) displaying scored related works in the record sidebar.
 
-Graph back-end is the 2026-04-30 LC BIBFRAME Hubs bulk dump loaded into the `neo4j-hubs-new` container (port 7475/7688). Earlier reconciliation tooling (`tools/reconcile/`, `tools/coverage/`, label-recovery, activity-stream crawler, `upstream_status`/`canonical_uri` runtime substitution) has been retired — the upstream snapshot now covers ~99% of live Hubs and the schema changed to a uniform reified pattern that obsoleted the old direct-edge handling.
+Graph back-end is the 2026-05-05 LC BIBFRAME Hubs bulk dump loaded into the `neo4j-hubs-v2` container (port 7476/7689). The 2026-04-30 graph (`neo4j-hubs-new`, 7475/7688) is preserved alongside for comparison. Earlier reconciliation tooling (`tools/reconcile/`, `tools/coverage/`, label-recovery, activity-stream crawler, `upstream_status`/`canonical_uri` runtime substitution) has been retired — the upstream snapshot now covers ~99% of live Hubs and the schema changed to a uniform reified pattern that obsoleted the old direct-edge handling.
 
 ### Data Flow
 1. MARC record → extract title/author/LCCN + Modern MARC identifiers (240/130 `$1`, 758)
@@ -44,13 +44,13 @@ Graph back-end is the 2026-04-30 LC BIBFRAME Hubs bulk dump loaded into the `neo
 - Hub URIs in bulk TTL dataset can be stale (404s) — live RDF always has current URIs
 
 ### Neo4j Graph (Fallback Data Source)
-- **Neo4j 5.26** with **n10s 5.26.0** plugin at `localhost:7475` (HTTP) / `localhost:7688` (Bolt).
-- Runs as standalone Docker container `neo4j-hubs-new` (NOT part of `docker-compose.yml`). Check `docker ps` for it before assuming Neo4j is down.
+- **Neo4j 5.26** with **n10s 5.26.0** plugin at `localhost:7476` (HTTP) / `localhost:7689` (Bolt) for the active 2026-05-05 graph; the 2026-04-30 graph remains on 7475/7688.
+- Runs as standalone Docker container `neo4j-hubs-v2` (NOT part of `docker-compose.yml`). Check `docker ps` for it (and `neo4j-hubs-new` for the older snapshot) before assuming Neo4j is down.
 - Auth: `neo4j/bibframe123`.
-- **~2.89M Hub nodes**, ~37.3M total nodes, ~152M triples from the 2026-04-30 LC bulk export. id.loc.gov reports ~2.93M live Hubs (~99% coverage); reconciliation tooling has been retired as no longer necessary.
+- **~2.91M Hub nodes**, ~37.1M total nodes, ~152.6M triples from the 2026-05-05 LC bulk export. id.loc.gov reports ~2.93M live Hubs (~99% coverage); reconciliation tooling has been retired as no longer necessary.
 - n10s SHORTEN mode: `ns0` = `bf:` (bibframe), `ns1` = `bflc:`, `ns3` = `dcterms:`.
 - Hub nodes have only `uri` property (UUID-based LC URI).
-- Titles: `(Hub)-[:ns0__title]->(bnode)` where bnode has `ns0__mainTitle` as string array.
+- Titles: `(Hub)-[:ns0__title]->(bnode)` where bnode has `ns0__mainTitle` stored as STRING when single-valued and LIST<STRING> when multi-valued (n10s `handleMultival: OVERWRITE` default). Cypher reading this property must branch on `valueType()` — `t.ns0__mainTitle[0]` crashes on STRING values. See `Neo4jService::getHubTitle()` and `getHubsBulk()` for the canonical `CASE WHEN valueType(...) STARTS WITH "LIST" THEN ...[0] ELSE ... END` pattern.
 - Agents: `(Hub)-[:ns0__contribution]->(bnode)-[:ns0__agent]->(Resource{uri})` — no name labels, just URIs.
 - Media types: `(Hub)-[:rdf__type]->(Resource)` with URIs like `bf:MovingImage`, `bf:Audio`, `bf:NotatedMusic`.
 - **Hub→Hub relations are uniformly reified** via `bf:Relation` blank nodes. There are NO direct `bf:translationOf`/`bf:relatedTo`/`bf:arrangementOf` edges and NO `bflc:Relationship` chain. Pattern:

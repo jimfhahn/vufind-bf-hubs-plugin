@@ -1,19 +1,21 @@
 # Neo4j Hub Graph Topology
 
-Verified 2026-05-01 against the `neo4j-hubs-new` container running the
-2026-04-30 LC BIBFRAME Hubs bulk dump (Neo4j 5.26.24, n10s 5.26.0,
-SHORTEN namespace mode).
+Verified 2026-05-08 against the `neo4j-hubs-v2` container running the
+2026-05-05 LC BIBFRAME Hubs bulk dump (Neo4j 5.26.24, n10s 5.26.0,
+SHORTEN namespace mode, host ports 7476/7689). The 2026-04-30 graph
+(`neo4j-hubs-new`, 7475/7688) is preserved alongside for comparison;
+counts and schema below match both snapshots within rounding.
 
 ## Snapshot stats
 
-| Metric | Value |
+| Metric | Value (2026-05-05) |
 | --- | --- |
-| Total triples loaded | ~152M |
-| Total nodes | ~37.3M |
-| Total relationships | ~69.1M |
-| `:ns0__Hub` nodes | ~2.89M |
-| `:ns0__Relation` reification nodes | ~547,756 |
-| `bf:Relation -[:associatedResource]-> Hub` edges | ~532,543 |
+| Total triples loaded | ~152.6M |
+| Total nodes | ~37.1M |
+| Total relationships | ~68.8M |
+| `:ns0__Hub` nodes | ~2.91M |
+| `:ns0__Relation` reification nodes | ~544K |
+| `bf:Relation -[:associatedResource]-> Hub` edges | ~532K |
 
 LC reports ~2.93M live Hubs, so this snapshot is ~99% complete. There is
 no longer any meaningful gap to chase via activity-stream ingestion or
@@ -56,7 +58,12 @@ uniformly:
 ## Other Hub-side patterns (unchanged from prior dumps)
 
 - **Titles**: `(Hub)-[:ns0__title]->(Title)` where `Title.ns0__mainTitle`
-  is a string array.
+  is **STRING when single-valued and LIST<STRING> when multi-valued**
+  (n10s default `handleMultival: OVERWRITE`). Cypher that reads this
+  property must handle both shapes — e.g.
+  `CASE WHEN valueType(t.ns0__mainTitle) STARTS WITH "LIST" THEN t.ns0__mainTitle[0] ELSE t.ns0__mainTitle END`.
+  A bare `t.ns0__mainTitle[0]` will crash on STRING values with
+  `String(...) is not a collection or a map`.
 - **Contributors**: `(Hub)-[:ns0__contribution]->(Contribution)-[:ns0__agent]->(Agent)`.
   Agent nodes have only a `uri` (no name labels).
 - **Media types**: `(Hub)-[:rdf__type]->(Resource)` where `Resource.uri`
@@ -71,5 +78,6 @@ Earlier work tracked legacy-Hub reconciliation:
 `upstream_status` / `canonical_uri` properties, label-recovery sweeps,
 the activity-stream crawler. None of that is present on this graph and
 none of the code paths that referenced those properties remain in the
-plugin. The 2026-04-30 snapshot already mirrors live id.loc.gov closely
-enough that runtime canonical substitution is no longer warranted.
+plugin. Both the 2026-04-30 and 2026-05-05 snapshots already mirror
+live id.loc.gov closely enough that runtime canonical substitution is
+no longer warranted.
