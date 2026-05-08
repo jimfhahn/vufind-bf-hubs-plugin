@@ -405,7 +405,6 @@ RETURN replace(replace(coalesce(rt.uri, "related"),
          "http://id.loc.gov/vocabulary/relationship/", ""),
          "http://id.loc.gov/entities/relationships/", "") AS relType,
        source.uri
-```
 
 -- Check medium type for a Hub
 MATCH (h:ns0__Hub)-[:rdf__type]->(t)
