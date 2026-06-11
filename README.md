@@ -2,7 +2,7 @@
 
 
 
-A VuFind plugin that surfaces **surprising, non-obvious work relationships** using Library of Congress BIBFRAME Hubs. Instead of showing the predictable (translations, series membership), the plugin prioritizes creative transformations, cross-medium adaptations, and unexpected connections between works.
+A VuFind plugin that surfaces **surprising, non-obvious work relationships** using Library of Congress BIBFRAME Hubs. The plugin prioritizes creative transformations, cross-medium adaptations, and unexpected connections between works.
 
 <div align="center">
   <kbd>
@@ -223,7 +223,7 @@ above and clearing the plugin's caches
 
 ## Design Principle
 
-> Surface surprising, non-obvious connections rather than predictable ones like translations or series membership.
+> Surface surprising, non-obvious Work connections.
 
 A patron viewing *Pride and Prejudice* should see derivatives and parodies, among others: *Death Comes to Pemberley* (P.D. James derivative), *Pride and Prejudice and Zombies* (parody).
 
@@ -252,7 +252,7 @@ As of LC's **Modern MARC** initiative (March 2026), BIBFRAME identifiers are emb
 | 758 | `$4` | Relationship type URI | Relationship type identification |
 | 100/700 | `$0`/`$1` | Name Authority / RWO URI | Future: precise author-distance scoring |
 
-> **Key finding**: LC uses `$1` (Real World Object URI) rather than `$0` for Hub URIs in 240/130. The plugin checks both subfields.
+> **Key finding**: LC uses `$1` (Real World Object URI) not `$0` for Hub URIs in 240/130. The plugin checks both subfields.
 
 See [docs/modern-marc-hub-discovery.md](docs/modern-marc-hub-discovery.md) for detailed findings and implementation notes.
 
