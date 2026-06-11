@@ -37,7 +37,7 @@ This is a working prototype shared for community feedback. Known constraints:
 - **Graph load is heavy.** Legacy MARC records (no Hub URI in the MARC) depend on a Neo4j graph built from the LC bulk dump (~5.4GB decompressed, ~30–60 min import). Modern MARC records carrying a Hub URI in 240/130 `$1` work without the full graph.
 - **Depends on `id.loc.gov` availability.** The primary data path and the URI-validation step both call `id.loc.gov`. If LC is slow or unreachable, related works may be sparse or absent (results are cached to soften this).
 - **URI validation uses the `.rdf` representation.** LC serves the human-readable `.html` view behind a WAF that returns HTTP 403 to non-browser clients, so validation HEAD-checks `{hubUri}.rdf` (200 = live, 404 = missing) instead.
-- **Tested against VuFind 11.0.2 only.** Other 11.x releases may work but are untested; earlier major versions are not supported.
+- **Tested against VuFind 11.0.2 only.** Other 11.x releases may work but are untested; earlier major versions are not tested.
 - **Snapshot drift.** The bulk graph is a point-in-time export (2026-05-05). Hub URIs can drift between LC publishes; the hard URI-validation gate hides any that no longer resolve.
 - **Test corpus is small.** Four canonical works ship as demo records; broader catalog behavior has not been systematically evaluated.
 
@@ -480,7 +480,7 @@ vufind-bf-hubs-plugin/
 ├── docker-compose.yml                 ← Docker dev environment (vufind + db)
 ├── docker/                            ← Dockerfile, entrypoint, VuFind config overrides
 ├── data/                              ← Local bulk-dump landing zone (gitignored)
-├── tests/                             ← Scoring tests (PHP + Python prototype)
+├── tests/                             ← Scoring tests (PHP + Python prototype; manual harnesses, not a CI suite)
 ├── composer.json                      ← PSR-4 autoload for the BibframeHub module
 └── vufind-plugin.code-workspace       ← Multi-root VS Code workspace
 ```
@@ -528,6 +528,20 @@ maxDisplayResults = 15              ; Max related works to show
 - **Authority-based author scoring**: Use 100/700 `$0`/`$1` Name Authority URIs for precise author-distance calculations without Neo4j agent lookups.
 - **Broader identifier-based Hub lookup**: ISBNs and other identifiers (not just title/LCCN) for more reliable MARC-to-Hub resolution.
 - **Collapsible tree UI refinement**: Verify and improve the indented tree display — ensure expand/collapse, caret rotation, and tier-based default states work correctly across browsers.
+
+## Feedback & Contributing
+
+This is a working prototype shared with the VuFind community for **design and
+architecture feedback** — it is not yet a drop-in production module. Feedback,
+questions, and contributions are all welcome:
+
+- **Open an issue** on the [GitHub repository](https://github.com/jimfhahn/vufind-bf-hubs-plugin/issues) for bugs, ideas, or design discussion.
+- **Pull requests** are welcome; please keep changes focused and describe the motivation.
+- For broader discussion, reach out via the **VuFind community channels** (the [vufind-tech mailing list](https://vufind.org/wiki/community) or VuFind Slack).
+
+The `tests/` directory contains manual scoring harnesses (a PHP end-to-end test
+against a live Neo4j instance and a Python prototype of the scoring model), not
+an automated CI suite. They are useful for validating scoring changes locally.
 
 ## Acknowledgments
 
