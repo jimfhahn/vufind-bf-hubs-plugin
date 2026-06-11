@@ -225,7 +225,7 @@ above and clearing the plugin's caches
 
 > Surface surprising, non-obvious connections rather than predictable ones like translations or series membership.
 
-A patron viewing *Pride and Prejudice* should see *Death Comes to Pemberley* (P.D. James derivative), the 2005 Keira Knightley film, *Pride and Prejudice and Zombies* (parody), and *Bride & Prejudice* (Bollywood adaptation) — rather than drowning in 30+ translations and a series container.
+A patron viewing *Pride and Prejudice* should see derivatives and parodies, among others: *Death Comes to Pemberley* (P.D. James derivative), *Pride and Prejudice and Zombies* (parody).
 
 ## How It Works
 
