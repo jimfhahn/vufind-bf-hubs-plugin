@@ -8,6 +8,8 @@
 
 A VuFind plugin that surfaces **surprising, non-obvious work relationships** using Library of Congress BIBFRAME Hubs. Instead of showing the predictable (translations, series membership), the plugin prioritizes creative transformations, cross-medium adaptations, and unexpected connections between works.
 
+![Related Works panel showing surprise-scored BIBFRAME Hub relationships for Pride and Prejudice, grouped by relationship type with media and different-author badges](docs/images/related-works-example.png)
+
 ## Quick Start (Docker)
 
 The fastest way to see the plugin in action. Requires Docker and a running Neo4j instance with the BIBFRAME Hubs dataset (see [Neo4j Setup](#neo4j-setup) below).
@@ -19,14 +21,25 @@ docker compose up --build
 ```
 
 VuFind will be available at **http://localhost:4567/vufind/**. Four test records are loaded automatically:
-- [Pride and Prejudice](http://localhost:4567/vufind/Record/test-pandp-001) — 5 relationship groups
-- [Hamlet](http://localhost:4567/vufind/Record/test-hamlet-001) — 2 relationship groups
-- [The Great Gatsby](http://localhost:4567/vufind/Record/test-gatsby-001) — 4 relationship groups
-- [Palinuro of Mexico](http://localhost:4567/vufind/Record/test-palinuro-001) — Modern MARC fast lane (Hub URI from 240 `$1`)
+- [Pride and Prejudice](http://localhost:4567/vufind/Record/test-pandp-001) — 7 relationship groups
+- [Hamlet](http://localhost:4567/vufind/Record/test-hamlet-001) — 5 relationship groups
+- [The Great Gatsby](http://localhost:4567/vufind/Record/test-gatsby-001) — 7 relationship groups
+- [Palinuro of Mexico](http://localhost:4567/vufind/Record/test-palinuro-001) — Modern MARC fast lane (Hub URI from 240 `$1`), 4 relationship groups
 
 The Docker setup includes VuFind (PHP 8.3 + Apache), MariaDB, and embedded Solr. Neo4j runs on the host and is accessed via `host.docker.internal`.
 
 > **Note on the graph back-end:** at runtime the plugin's *primary* data path is **live RDF/XML from `id.loc.gov`** for whichever Hub the record resolves to. Neo4j is used as a fallback (when the live RDF is empty or unreachable) and as a metadata cache for related-Hub titles, agents, and media types during scoring. The full bulk-imported graph is **not strictly required** to run the plugin against modern MARC records that carry a Hub URI in 240/130 `$1`; it becomes important for legacy records that depend on title/LCCN lookup, and for fully-populated scoring of related Hubs.
+
+## Limitations & Known Caveats
+
+This is a working prototype shared for community feedback. Known constraints:
+
+- **Graph load is heavy.** Legacy MARC records (no Hub URI in the MARC) depend on a Neo4j graph built from the LC bulk dump (~5.4GB decompressed, ~30–60 min import). Modern MARC records carrying a Hub URI in 240/130 `$1` work without the full graph.
+- **Depends on `id.loc.gov` availability.** The primary data path and the URI-validation step both call `id.loc.gov`. If LC is slow or unreachable, related works may be sparse or absent (results are cached to soften this).
+- **URI validation uses the `.rdf` representation.** LC serves the human-readable `.html` view behind a WAF that returns HTTP 403 to non-browser clients, so validation HEAD-checks `{hubUri}.rdf` (200 = live, 404 = missing) instead.
+- **Tested against VuFind 11.0.2 only.** Other 11.x releases may work but are untested; earlier major versions are not supported.
+- **Snapshot drift.** The bulk graph is a point-in-time export (2026-05-05). Hub URIs can drift between LC publishes; the hard URI-validation gate hides any that no longer resolve.
+- **Test corpus is small.** Four canonical works ship as demo records; broader catalog behavior has not been systematically evaluated.
 
 ## Installing into an Existing VuFind
 
