@@ -46,7 +46,7 @@ Graph back-end is the 2026-05-05 LC BIBFRAME Hubs bulk dump loaded into the `neo
 ### Neo4j Graph (Fallback Data Source)
 - **Neo4j 5.26** with **n10s 5.26.0** plugin at `localhost:7476` (HTTP) / `localhost:7689` (Bolt) for the active 2026-05-05 graph; the 2026-04-30 graph remains on 7475/7688.
 - Runs as standalone Docker container `neo4j-hubs-v2` (NOT part of `docker-compose.yml`). Check `docker ps` for it (and `neo4j-hubs-new` for the older snapshot) before assuming Neo4j is down.
-- Auth: `neo4j/bibframe123`.
+- Auth: `neo4j` user; password is the demo default set in `docker/local/config/vufind/BibframeHub.ini`.
 - **~2.91M Hub nodes**, ~37.1M total nodes, ~152.6M triples from the 2026-05-05 LC bulk export. id.loc.gov reports ~2.93M live Hubs (~99% coverage); reconciliation tooling has been retired as no longer necessary.
 - n10s SHORTEN mode: `ns0` = `bf:` (bibframe), `ns1` = `bflc:`, `ns3` = `dcterms:`.
 - Hub nodes have only `uri` property (UUID-based LC URI).

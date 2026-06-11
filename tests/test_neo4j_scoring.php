@@ -15,10 +15,10 @@ use BibframeHub\Relationship\RelationshipInferrer;
 
 // ── Setup ──
 $neo4j = new Neo4jService([
-    'uri'      => 'bolt://localhost:7687',
-    'username' => 'neo4j',
-    'password' => 'bibframe123',
-    'database' => 'neo4j',
+    'uri'      => getenv('NEO4J_URI') ?: 'http://localhost:7474',
+    'username' => getenv('NEO4J_USERNAME') ?: 'neo4j',
+    'password' => getenv('NEO4J_PASSWORD') ?: 'bibframe123',
+    'database' => getenv('NEO4J_DATABASE') ?: 'neo4j',
     'enabled'  => true,
 ]);
 

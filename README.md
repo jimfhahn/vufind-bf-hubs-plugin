@@ -32,9 +32,9 @@ The Docker setup includes VuFind (PHP 8.3 + Apache), MariaDB, and embedded Solr.
 
 ### Prerequisites
 
-- VuFind 10.x or 11.x
+- VuFind 11.x (developed and tested against 11.0.2; other versions may work but are untested)
 - Neo4j 5.x with the [n10s](https://neo4j.com/labs/neosemantics/) plugin and the BIBFRAME Hubs dataset loaded (see [Neo4j Setup](#neo4j-setup))
-- PHP 8.1+
+- PHP 8.1+ (tested on 8.3)
 
 ### 1. Clone the plugin
 
@@ -80,12 +80,13 @@ composer dump-autoload
 cp /path/to/your/vufind-bf-hubs-plugin/config/BibframeHub.ini /path/to/vufind/local/config/vufind/BibframeHub.ini
 ```
 
-Edit `BibframeHub.ini` and set your Neo4j connection details:
+Edit `BibframeHub.ini` and set your Neo4j connection details (the plugin
+uses Neo4j's HTTP API, not Bolt):
 
 ```ini
 [Neo4j]
 enabled = true
-uri = "bolt://localhost:7687"
+uri = "http://localhost:7474"
 username = "neo4j"
 password = "your_neo4j_password"
 database = "neo4j"
@@ -296,7 +297,10 @@ Based on `rdf:type` on Hub nodes: `MovingImage`, `Audio`, `NotatedMusic`, `Multi
 
 ### Setup
 
-See [Neo4j Setup](#neo4j-setup) above for the full bootstrap. Quick recap:
+See [Neo4j Setup](#neo4j-setup) above for the full bootstrap. Quick recap
+(`bibframe123` is the demo default that matches
+`docker/local/config/vufind/BibframeHub.ini` — use your own password in
+production):
 
 ```bash
 docker run -d --name neo4j-hubs \
@@ -494,7 +498,7 @@ timeout = 10
 
 [Neo4j]
 enabled = true                      ; Set to false to disable graph queries
-uri = "bolt://localhost:7687"       ; Neo4j connection (HTTP 7474 or Bolt 7687)
+uri = "http://localhost:7474"       ; Neo4j HTTP API endpoint (the plugin uses cURL, not Bolt)
 username = "neo4j"
 password = "your_password"
 database = "neo4j"
@@ -521,4 +525,4 @@ maxDisplayResults = 15              ; Max related works to show
 
 ## License
 
-This project is open source. BIBFRAME Hub data is from the Library of Congress Linked Data Service.
+[GPL-2.0-or-later](LICENSE) — the same license as VuFind itself. BIBFRAME Hub data is from the Library of Congress Linked Data Service.

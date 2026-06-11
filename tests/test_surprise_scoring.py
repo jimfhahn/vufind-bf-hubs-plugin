@@ -9,12 +9,18 @@ Surprise = f(relationship_type_tier, rarity_bonus, author_distance, medium_cross
 
 import json
 import math
+import os
 import sys
 from urllib.request import Request, urlopen
 from urllib.parse import quote
 
-NEO4J_URL = "http://localhost:7474/db/neo4j/tx/commit"
-NEO4J_AUTH = ("neo4j", "bibframe123")
+NEO4J_URL = os.environ.get(
+    "NEO4J_URL", "http://localhost:7474/db/neo4j/tx/commit"
+)
+NEO4J_AUTH = (
+    os.environ.get("NEO4J_USERNAME", "neo4j"),
+    os.environ.get("NEO4J_PASSWORD", "bibframe123"),
+)
 
 # ─── Relationship Type Tiers ───────────────────────────────────────
 # Tier 1: Creative transformations (most surprising — different lens on same material)
