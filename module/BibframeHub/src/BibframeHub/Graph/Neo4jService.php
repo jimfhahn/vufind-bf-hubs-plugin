@@ -71,9 +71,12 @@ class Neo4jService implements LoggerAwareInterface
                  WHERE score > 5.0
                  MATCH (h:ns0__Hub)-[:ns0__title]->(t)
                  WITH DISTINCT h
-                 LIMIT 20
-                 OPTIONAL MATCH (h)-[r]-(other:ns0__Hub)
-                 RETURN h.uri AS uri, count(r) AS rels
+                 LIMIT 30
+                 OPTIONAL MATCH (h)-[:ns0__relation]->(:ns0__Relation)-[:ns0__associatedResource]->(o:ns0__Hub)
+                 WITH h, count(o) AS outRels
+                 OPTIONAL MATCH (h)<-[:ns0__associatedResource]-(:ns0__Relation)<-[:ns0__relation]-(i:ns0__Hub)
+                 WITH h, outRels, count(i) AS inRels
+                 RETURN h.uri AS uri, outRels + inRels AS rels
                  ORDER BY rels DESC
                  LIMIT 1',
                 ['query' => $escaped]

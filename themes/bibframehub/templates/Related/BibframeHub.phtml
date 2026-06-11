@@ -39,7 +39,7 @@
          aria-expanded="<?=$expanded ? 'true' : 'false'?>"
          aria-controls="<?=$collapseId?>">
         <span class="bibframe-hub-caret me-1"><?=$expanded ? '&#9660;' : '&#9654;'?></span>
-        <span class="badge bg-white text-dark border me-2"><?=$this->escapeHtml($label)?></span>
+        <span class="badge bibframe-hub-label me-2"><?=$this->escapeHtml($label)?></span>
         <small class="text-muted">(<?=$count?>)</small>
       </a>
 
@@ -57,10 +57,10 @@
               <span><?=$this->escapeHtml($result['title'] ?? 'Unknown')?></span>
               <?php endif; ?>
               <?php if (!empty($result['media'])): ?>
-                <span class="badge bg-info text-dark"><?=$this->escapeHtml(implode(', ', $result['media']))?></span>
+                <span class="badge bibframe-hub-media"><?=$this->escapeHtml(implode(', ', $result['media']))?></span>
               <?php endif; ?>
               <?php if (!empty($result['differentAuthor'])): ?>
-                <span class="badge bg-warning text-dark">Different Author</span>
+                <span class="badge bibframe-hub-author">Different Author</span>
               <?php endif; ?>
             </li>
           <?php endforeach; ?>
@@ -77,6 +77,24 @@
   .bibframe-hub-caret { font-size: 0.7em; width: 1em; text-align: center; transition: transform 0.15s; }
   .bibframe-hub-group-toggle[aria-expanded="true"] .bibframe-hub-caret { content: ''; }
   .bibframe-hub-result a { font-size: 0.95em; }
+  /* Light blue relationship-type pill. #084298 on #cfe2ff = ~7.4:1 contrast (WCAG AAA). */
+  .bibframe-hub-tree .badge.bibframe-hub-label {
+    background-color: #cfe2ff;
+    color: #084298;
+    border: 1px solid #9ec5fe;
+  }
+  /* Media pill: #055160 on #cff4fc = ~7.4:1 (WCAG AAA). */
+  .bibframe-hub-tree .badge.bibframe-hub-media {
+    background-color: #cff4fc;
+    color: #055160;
+    border: 1px solid #9eeaf9;
+  }
+  /* Different-author pill: #664d03 on #fff3cd = ~8.3:1 (WCAG AAA). */
+  .bibframe-hub-tree .badge.bibframe-hub-author {
+    background-color: #fff3cd;
+    color: #664d03;
+    border: 1px solid #ffe69c;
+  }
 </style>
 
 <script>

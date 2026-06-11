@@ -92,7 +92,6 @@ class BibframeHub implements RelatedInterface
 
         // Pre-set hub title from the catalog record (better than Neo4j's first-found)
         $this->hubTitle = $marcFields['uniformTitle'] ?? $marcFields['title'] ?? null;
-
         // Save the original URI from resolution for fallback
         $originalUri = $this->hubUri;
 
@@ -152,7 +151,6 @@ class BibframeHub implements RelatedInterface
 
         // Step 3: Validate URIs against id.loc.gov.
         $this->results = $this->validateDisplayedUris($scored);
-
         // Always validate the primary Hub URI before linking to it. The
         // RDF fast-lane URIs can also drift, and reconciliation may not
         // have caught up — hard-validation is the final gate.
@@ -672,11 +670,32 @@ class BibframeHub implements RelatedInterface
     }
 
     /**
+     * Build the URL used to validate a Hub URI.
+     *
+     * id.loc.gov serves the human-readable ".html" view behind a WAF that
+     * returns HTTP 403 to non-browser clients (and HEAD requests), so a HEAD
+     * on the bare Hub URI cannot distinguish a live Hub from a dead one — both
+     * 301 to https and then 403 on the rendered page. The ".rdf" representation
+     * is not WAF-gated: it returns 200 for real Hubs and 404 for missing ones,
+     * which is exactly the signal we need.
+     */
+    protected function buildValidationUrl(string $uri): string
+    {
+        if (
+            strpos($uri, 'id.loc.gov') !== false
+            && !preg_match('/\.(rdf|json|nt|ttl|xml)$/i', $uri)
+        ) {
+            return $uri . '.rdf';
+        }
+        return $uri;
+    }
+
+    /**
      * Perform a lightweight HEAD request to check if a URI resolves (2xx or 3xx).
      */
     protected function headCheckUri(string $uri): bool
     {
-        $ch = curl_init($uri);
+        $ch = curl_init($this->buildValidationUrl($uri));
         curl_setopt_array($ch, [
             CURLOPT_NOBODY => true,
             CURLOPT_FOLLOWLOCATION => true,
@@ -715,7 +734,7 @@ class BibframeHub implements RelatedInterface
             $mh = curl_multi_init();
             $handles = [];
             foreach ($chunk as $uri) {
-                $ch = curl_init($uri);
+                $ch = curl_init($this->buildValidationUrl($uri));
                 curl_setopt_array($ch, [
                     CURLOPT_NOBODY         => true,
                     CURLOPT_FOLLOWLOCATION => true,
