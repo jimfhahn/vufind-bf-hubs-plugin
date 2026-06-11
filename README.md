@@ -1,14 +1,15 @@
 # VuFind BIBFRAME Hub Plugin
 
-> **Status: Working end-to-end (May 2026).** This plugin runs against the
-> 2026-05-05 LC BIBFRAME Hubs bulk dump (~2.91M Hub nodes, ~99% of LC's
-> live Hub population). Earlier reconciliation tooling (graph-coverage
-> sweeps, label-recovery, activity-stream crawler) has been retired now
-> that the upstream snapshot is current.
+
 
 A VuFind plugin that surfaces **surprising, non-obvious work relationships** using Library of Congress BIBFRAME Hubs. Instead of showing the predictable (translations, series membership), the plugin prioritizes creative transformations, cross-medium adaptations, and unexpected connections between works.
 
-![Related Works panel showing surprise-scored BIBFRAME Hub relationships for Pride and Prejudice, grouped by relationship type with media and different-author badges](docs/images/related-works-example.png)
+<div align="center">
+  <kbd>
+    <img src="https://github.com/user-attachments/assets/70dd3232-3d52-480d-a01d-1d5aa19c83da" width="323" height="333" alt="related-works-example" />
+  </kbd>
+</div>
+
 
 ## Quick Start (Docker)
 
