@@ -246,7 +246,16 @@ class BibframeHub implements RelatedInterface
         }
 
         $parsed = $this->rdfParser->fetchAndParse($hubUri);
-        if (!$parsed || empty($parsed['relations'])) {
+        if (!$parsed) {
+            // Fetch/parse failed (timeout, non-200, malformed XML). This is a
+            // transient condition — do NOT poison the negative cache, or a
+            // slow first fetch of a large hub permanently strands it on the
+            // thinner Neo4j fallback. Just bail and let the next load retry.
+            return [];
+        }
+        if (empty($parsed['relations'])) {
+            // Fetch succeeded but the hub genuinely has no scorable relations.
+            // This outcome is stable, so cache it to skip the slow re-fetch.
             $this->emptyRdfCache[$hubUri] = ['time' => time()];
             $this->saveEmptyRdfCache();
             return [];

@@ -1,0 +1,109 @@
+# Production / single-VM deployment (Linode, Hetzner, any Docker host).
+#
+# Differences from the dev docker-compose.yml:
+#   - Neo4j runs as a service here (dev expects it standalone on the host via
+#     host.docker.internal). The plugin is repointed to the `neo4j` service name.
+#   - Secrets come from a .env file (see .env.example), not committed defaults.
+#   - Caddy terminates TLS and reverse-proxies VuFind on 80/443.
+#   - Solr/admin ports are NOT published to the host (internal only).
+#
+# First-time setup:
+#   1. cp .env.example .env   &&  edit secrets + DOMAIN
+#   2. Load the Hub graph into the neo4j volume ONCE (see README / repo notes):
+#        - either import locally and copy the volume, or
+#        - run the n10s import against this container, then it just `start`s.
+#   3. docker compose -f docker-compose.prod.yml up -d --build
+#
+# Memory note: NEO4J_*_size below is tuned LOW for a demo box (~2 GB Neo4j).
+# Raise heap/pagecache if you put the VM under real concurrent load.
+
+services:
+  vufind:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "80"
+    volumes:
+      - ./module/BibframeHub:/usr/local/vufind/module/BibframeHub
+      - ./themes/bibframehub:/usr/local/vufind/themes/bibframehub
+      - ./docker/local/config/vufind/config.ini:/vufind-local/config/vufind/config.ini
+      # Prod plugin config points at the neo4j service, not host.docker.internal.
+      - ./docker/local/config/vufind/BibframeHub.prod.ini:/vufind-local/config/vufind/BibframeHub.ini
+      - ./data/showcase:/data/showcase:ro
+      - ./docker/load-showcase-marc.php:/usr/local/bin/load-showcase-marc.php:ro
+      - solr-data:/usr/local/vufind/solr/vufind/biblio/index
+      - ./docker/local/cache/log:/vufind-local/cache/log
+    environment:
+      - VUFIND_LOCAL_MODULES=BibframeHub
+    depends_on:
+      db:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set in .env}
+      MYSQL_DATABASE: vufind
+      MYSQL_USER: vufind
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set in .env}
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5.26
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?set in .env}
+      NEO4J_PLUGINS: '["n10s"]'
+      # Full-performance defaults (match the local dev import recipe) so the
+      # 2.9M-hub graph stays warm in RAM for a fast, compelling demo. These
+      # need an 8 GB+ host; lower them only on a constrained box.
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP:-4G}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP:-4G}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-2G}
+    volumes:
+      - neo4j-data:/data
+      # Mount the TTL dump here for a one-time n10s import, then it can be removed.
+      - ./data:/import:ro
+    expose:
+      - "7474"
+      - "7687"
+    healthcheck:
+      # Cypher-shell ping; container is "healthy" once Bolt accepts auth.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:?set in .env}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - vufind
+
+volumes:
+  db-data:
+  solr-data:
+  neo4j-data:
+  caddy-data:
+  caddy-config:

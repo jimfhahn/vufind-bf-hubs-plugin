@@ -6,13 +6,13 @@
  * and stores the full MARCXML under `fullrecord` so the BibframeHub plugin
  * can parse it on demand.
  *
- * Usage:  php load-heng-marc.php <marcxml-file> <id-prefix>
- * Example: php load-heng-marc.php /data/Concerto-MARC.xml concerto
+ * Usage:  php load-showcase-marc.php <marcxml-file> <id-prefix>
+ * Example: php load-showcase-marc.php /data/showcase/Showcase-MARC.xml showcase
  */
 declare(strict_types=1);
 
 if ($argc < 3) {
-    fwrite(STDERR, "Usage: php load-heng-marc.php <marcxml-file> <id-prefix>\n");
+    fwrite(STDERR, "Usage: php load-showcase-marc.php <marcxml-file> <id-prefix>\n");
     exit(1);
 }
 

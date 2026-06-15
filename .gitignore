@@ -7,6 +7,9 @@ data/hubs.bibframe-*.ttl.gz
 # Docker runtime
 docker/local/cache/
 
+# Production secrets (never commit; see .env.example)
+.env
+
 # IDE / workspace
 *.code-workspace
 .DS_Store

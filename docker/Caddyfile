@@ -1,0 +1,14 @@
+# Caddy reverse proxy for VuFind (automatic HTTPS via Let's Encrypt).
+# {$DOMAIN} is supplied by docker-compose.prod.yml from .env.
+#
+# For a quick IP-only / no-domain test, replace the site line with `:80`
+# and Caddy will serve plain HTTP without trying to provision a certificate.
+
+{$DOMAIN} {
+	encode gzip
+
+	# VuFind lives under /vufind; send the root there for convenience.
+	redir / /vufind/ 302
+
+	reverse_proxy vufind:80
+}

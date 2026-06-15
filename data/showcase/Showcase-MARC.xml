@@ -1,0 +1,494 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Curated showcase records for the BibframeHub demo.
+
+  Each record carries its VERIFIED canonical LC Hub URI in 240 $1 (the Modern
+  MARC "fast lane"), so the plugin resolves deterministically and the
+  surprise-scoring model has a richly-connected base-work hub to traverse.
+
+  Hubs were chosen by querying the neo4j-hubs-v2 graph (2026-05-05 LC dump) for
+  bidirectional relation degree, then confirming authorship via id.loc.gov RDF.
+  The set is deliberately weighted toward diverse and international voices.
+  See heng-et-al-2026/find_richest_hubs.py and /memories/session/showcase-hubs.md.
+-->
+<collection xmlns="http://www.loc.gov/MARC21/slim">
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">beloved</controlfield>
+    <controlfield tag="008">040101s2004    nyu           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Morrison, Toni,</subfield>
+      <subfield code="d">1931-2019,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Beloved</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/3cf289bd-f322-132f-8439-faa0214b6e66</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Beloved /</subfield>
+      <subfield code="c">Toni Morrison.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Vintage International,</subfield>
+      <subfield code="c">2004.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">color-purple</controlfield>
+    <controlfield tag="008">820101s1982    nyu           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Walker, Alice,</subfield>
+      <subfield code="d">1944-</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Color purple</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/5583bfde-a57c-fd01-a00b-15a3de247e91</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="4">
+      <subfield code="a">The color purple /</subfield>
+      <subfield code="c">Alice Walker.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Harcourt,</subfield>
+      <subfield code="c">1982.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">invisible-man</controlfield>
+    <controlfield tag="008">950101s1995    nyu           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Ellison, Ralph,</subfield>
+      <subfield code="d">1914-1994,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Invisible man</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/328cef4f-4159-c30e-9b29-76145604a57d</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Invisible man /</subfield>
+      <subfield code="c">Ralph Ellison.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Vintage International,</subfield>
+      <subfield code="c">1995.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">their-eyes</controlfield>
+    <controlfield tag="008">060101s2006    nyu           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Hurston, Zora Neale,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Their eyes were watching God</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/61fdccb2-ae30-4c4d-9cb4-eef64db12fbe</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Their eyes were watching God /</subfield>
+      <subfield code="c">Zora Neale Hurston.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Harper Perennial,</subfield>
+      <subfield code="c">2006.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">native-son</controlfield>
+    <controlfield tag="008">050101s2005    nyu           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Wright, Richard,</subfield>
+      <subfield code="d">1908-1960,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Native son</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/170c9581-7898-7489-9fc9-59dcd0a4b78f</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Native son /</subfield>
+      <subfield code="c">Richard Wright.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Harper Perennial,</subfield>
+      <subfield code="c">2005.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">things-fall-apart</controlfield>
+    <controlfield tag="008">940101s1994    nyu           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Achebe, Chinua,</subfield>
+      <subfield code="d">1930-2013,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Things fall apart</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/3e8b5112-1d24-a46e-8d02-9d754165679e</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Things fall apart /</subfield>
+      <subfield code="c">Chinua Achebe.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Anchor Books,</subfield>
+      <subfield code="c">1994.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">half-yellow-sun</controlfield>
+    <controlfield tag="008">060101s2006    nyu           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Adichie, Chimamanda Ngozi,</subfield>
+      <subfield code="d">1977-</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Half of a yellow sun</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/a8a81b82-5228-9b0d-7827-43d7d6dfa9a8</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Half of a yellow sun /</subfield>
+      <subfield code="c">Chimamanda Ngozi Adichie.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Alfred A. Knopf,</subfield>
+      <subfield code="c">2006.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">midnights-children</controlfield>
+    <controlfield tag="008">810101s1981    nyu           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Rushdie, Salman,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Midnight's children</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/33f61da3-f867-690d-4f66-c70ab465486b</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Midnight's children /</subfield>
+      <subfield code="c">Salman Rushdie.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Random House,</subfield>
+      <subfield code="c">1981.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">joy-luck-club</controlfield>
+    <controlfield tag="008">890101s1989    nyu           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Tan, Amy,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Joy Luck Club</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/67bd5e6b-2f4e-dd27-1f94-63caecae91b6</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="4">
+      <subfield code="a">The Joy Luck Club /</subfield>
+      <subfield code="c">Amy Tan.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">G.P. Putnam's Sons,</subfield>
+      <subfield code="c">1989.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">pachinko</controlfield>
+    <controlfield tag="008">170101s2017    nyu           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Lee, Min Jin,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Pachinko</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/80c8e8e3-e313-a60a-19a1-b47da68450a4</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Pachinko /</subfield>
+      <subfield code="c">Min Jin Lee.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Grand Central Publishing,</subfield>
+      <subfield code="c">2017.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200277 i 4500</leader>
+    <controlfield tag="001">tale-of-genji</controlfield>
+    <controlfield tag="008">010101s2001    nyu           000 1 eng d</controlfield>
+    <datafield tag="041" ind1="1" ind2=" ">
+      <subfield code="a">eng</subfield>
+      <subfield code="h">jpn</subfield>
+    </datafield>
+    <datafield tag="100" ind1="0" ind2=" ">
+      <subfield code="a">Murasaki Shikibu,</subfield>
+      <subfield code="d">978?-</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Genji monogatari.</subfield>
+      <subfield code="l">English</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/7fe79a79-d79e-f576-247a-dc1d584a272a</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="4">
+      <subfield code="a">The tale of Genji /</subfield>
+      <subfield code="c">Murasaki Shikibu ; translated by Royall Tyler.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Viking,</subfield>
+      <subfield code="c">2001.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200277 i 4500</leader>
+    <controlfield tag="001">like-water-chocolate</controlfield>
+    <controlfield tag="008">920101s1992    nyu           000 1 eng d</controlfield>
+    <datafield tag="041" ind1="1" ind2=" ">
+      <subfield code="a">eng</subfield>
+      <subfield code="h">spa</subfield>
+    </datafield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Esquivel, Laura,</subfield>
+      <subfield code="d">1950-</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Como agua para chocolate.</subfield>
+      <subfield code="l">English</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/8e891e1e-e031-9b2f-5ad1-91000b835f9b</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Like water for chocolate /</subfield>
+      <subfield code="c">Laura Esquivel ; translated by Carol Christensen and Thomas Christensen.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Doubleday,</subfield>
+      <subfield code="c">1992.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200277 i 4500</leader>
+    <controlfield tag="001">anna-karenina</controlfield>
+    <controlfield tag="008">000101s2000    nyu           000 1 eng d</controlfield>
+    <datafield tag="041" ind1="1" ind2=" ">
+      <subfield code="a">eng</subfield>
+      <subfield code="h">rus</subfield>
+    </datafield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Tolstoy, Leo,</subfield>
+      <subfield code="c">graf,</subfield>
+      <subfield code="d">1828-1910,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Anna Karenina.</subfield>
+      <subfield code="l">English</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/8aec1fd2-4b70-8569-66ec-ac4c9acd3fa3</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Anna Karenina /</subfield>
+      <subfield code="c">Leo Tolstoy ; translated by Richard Pevear and Larissa Volokhonsky.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Penguin Books,</subfield>
+      <subfield code="c">2000.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200277 i 4500</leader>
+    <controlfield tag="001">crime-and-punishment</controlfield>
+    <controlfield tag="008">920101s1992    nyu           000 1 eng d</controlfield>
+    <datafield tag="041" ind1="1" ind2=" ">
+      <subfield code="a">eng</subfield>
+      <subfield code="h">rus</subfield>
+    </datafield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Dostoyevsky, Fyodor,</subfield>
+      <subfield code="d">1821-1881,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Prestuplenie i nakazanie.</subfield>
+      <subfield code="l">English</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/2c82aff5-a957-f21a-3412-4b483b446ed8</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Crime and punishment /</subfield>
+      <subfield code="c">Fyodor Dostoyevsky ; translated by Richard Pevear and Larissa Volokhonsky.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Vintage Classics,</subfield>
+      <subfield code="c">1992.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">heart-of-darkness</controlfield>
+    <controlfield tag="008">990101s1999    enk           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Conrad, Joseph,</subfield>
+      <subfield code="d">1857-1924,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Heart of darkness</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/6ffe100d-6d4d-83d4-70a3-ec240647eb8a</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Heart of darkness /</subfield>
+      <subfield code="c">Joseph Conrad.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">London :</subfield>
+      <subfield code="b">Penguin Books,</subfield>
+      <subfield code="c">1999.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200277 i 4500</leader>
+    <controlfield tag="001">don-quixote</controlfield>
+    <controlfield tag="008">030101s2003    nyu           000 1 eng d</controlfield>
+    <datafield tag="041" ind1="1" ind2=" ">
+      <subfield code="a">eng</subfield>
+      <subfield code="h">spa</subfield>
+    </datafield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Cervantes Saavedra, Miguel de,</subfield>
+      <subfield code="d">1547-1616,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Don Quixote.</subfield>
+      <subfield code="l">English</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/988750ad-b8a6-2118-4287-dbd8cbdc04a7</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Don Quixote /</subfield>
+      <subfield code="c">Miguel de Cervantes ; translated by Edith Grossman.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">New York :</subfield>
+      <subfield code="b">Ecco,</subfield>
+      <subfield code="c">2003.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">frankenstein</controlfield>
+    <controlfield tag="008">920101s1992    enk           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Shelley, Mary Wollstonecraft,</subfield>
+      <subfield code="d">1797-1851,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Frankenstein</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/5b163362-91e2-22b3-b9d7-e2e5b3de00b7</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Frankenstein, or, The modern Prometheus /</subfield>
+      <subfield code="c">Mary Shelley.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">London :</subfield>
+      <subfield code="b">Penguin Books,</subfield>
+      <subfield code="c">1992.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">dracula</controlfield>
+    <controlfield tag="008">970101s1997    enk           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Stoker, Bram,</subfield>
+      <subfield code="d">1847-1912,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">Dracula</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/24f2c5dc-10bb-1385-b89a-8d41c3f0d1f8</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Dracula /</subfield>
+      <subfield code="c">Bram Stoker.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">London :</subfield>
+      <subfield code="b">Penguin Books,</subfield>
+      <subfield code="c">1997.</subfield>
+    </datafield>
+  </record>
+
+  <record>
+    <leader>01000nam a2200265 i 4500</leader>
+    <controlfield tag="001">to-kill-a-mockingbird</controlfield>
+    <controlfield tag="008">600101s1960    alu           000 1 eng d</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Lee, Harper,</subfield>
+      <subfield code="d">1926-2016,</subfield>
+      <subfield code="e">author.</subfield>
+    </datafield>
+    <datafield tag="240" ind1="1" ind2="0">
+      <subfield code="a">To kill a mockingbird</subfield>
+      <subfield code="1">http://id.loc.gov/resources/hubs/bd87d7da-5ba6-d333-f606-229678a6f85d</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">To kill a mockingbird /</subfield>
+      <subfield code="c">Harper Lee.</subfield>
+    </datafield>
+    <datafield tag="264" ind1=" " ind2="1">
+      <subfield code="a">Philadelphia :</subfield>
+      <subfield code="b">J.B. Lippincott,</subfield>
+      <subfield code="c">1960.</subfield>
+    </datafield>
+  </record>
+
+</collection>
