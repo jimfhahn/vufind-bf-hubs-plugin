@@ -21,11 +21,23 @@ cd vufind-bf-hubs-plugin
 docker compose up --build
 ```
 
-VuFind will be available at **http://localhost:4567/vufind/**. Four test records are loaded automatically:
-- [Pride and Prejudice](http://localhost:4567/vufind/Record/test-pandp-001) — 7 relationship groups
-- [Hamlet](http://localhost:4567/vufind/Record/test-hamlet-001) — 5 relationship groups
-- [The Great Gatsby](http://localhost:4567/vufind/Record/test-gatsby-001) — 7 relationship groups
-- [Palinuro of Mexico](http://localhost:4567/vufind/Record/test-palinuro-001) — Modern MARC fast lane (Hub URI from 240 `$1`), 4 relationship groups
+VuFind will be available at **http://localhost:4567/vufind/**. The demo loads a curated **showcase set of diverse, classic works** whose canonical LC Hub URIs are embedded in MARC 240 `$1` (the Modern MARC fast lane), alongside four original test records.
+
+**Showcase highlights** (rich, cross-medium connections):
+- [Frankenstein](http://localhost:4567/vufind/Record/showcase-frankenstein) — Mary Shelley — film adaptations (*Young Frankenstein*, *Frankenweenie*, *Curse of Frankenstein*…) plus translations
+- [Dracula](http://localhost:4567/vufind/Record/showcase-dracula) — Bram Stoker — film & TV adaptations (*Bram Stoker's Dracula*, *Dracula A.D. 1972*, 2020 series…)
+- [Anna Karenina](http://localhost:4567/vufind/Record/showcase-anna-karenina) — Lev Tolstoy — motion-picture *and* opera adaptations plus translations
+- [Beloved](http://localhost:4567/vufind/Record/showcase-beloved) — Toni Morrison — 1998 film adaptation plus translations
+- [Things Fall Apart](http://localhost:4567/vufind/Record/showcase-things-fall-apart) — Chinua Achebe — links to Achebe's sequel *No Longer at Ease* plus translations
+- [The Tale of Genji](http://localhost:4567/vufind/Record/showcase-tale-of-genji) — Murasaki Shikibu — related works and translations
+
+The full showcase set spans 19 works by diverse voices — Morrison, Walker, Ellison, Hurston, Wright, Achebe, Adichie, Rushdie, Tan, Lee, Murasaki, Esquivel, Tolstoy, Dostoyevsky, Conrad, Cervantes, Shelley, Stoker, and Harper Lee.
+
+**Original test records** (legacy resolution + fast-lane example):
+- [Pride and Prejudice](http://localhost:4567/vufind/Record/test-pandp-001)
+- [Hamlet](http://localhost:4567/vufind/Record/test-hamlet-001)
+- [The Great Gatsby](http://localhost:4567/vufind/Record/test-gatsby-001)
+- [Palinuro of Mexico](http://localhost:4567/vufind/Record/test-palinuro-001) — Modern MARC fast lane (Hub URI from 240 `$1`)
 
 The Docker setup includes VuFind (PHP 8.3 + Apache), MariaDB, and embedded Solr. Neo4j runs on the host and is accessed via `host.docker.internal`.
 
