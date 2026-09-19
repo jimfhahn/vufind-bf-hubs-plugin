@@ -253,7 +253,7 @@ plugin's runtime path):
   browser and renders any Hub's bibliographic family — bottom-up climb from
   a translation to its Work, then a top-down indented tree coloured by the
   same surprise tiers the plugin uses. Deep-linkable via `?hub=<uuid>`,
-  so the sidebar can point at it.
+  so the sidebar can point at it (config key `[Display] explorerUrl`).
 
 The intended end state: the plugin keeps its fast RDF-first path for the
 sidebar, and links out to hosted notebooks for "explore this work's family"
@@ -561,6 +561,8 @@ database = "neo4j"
 validateUris = true                 ; HEAD-check URIs before displaying links
 validationCacheTtl = 86400          ; Cache validation results for 24 hours
 maxDisplayResults = 15              ; Max related works to show
+; explorerUrl = "https://jimfhahn-bibframe-hub-explorer.static.hf.space/"
+;                                   ; Optional: adds an "Explore family" link to {explorerUrl}?hub={uuid}
 ```
 
 ## Roadmap

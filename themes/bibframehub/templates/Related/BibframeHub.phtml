@@ -5,6 +5,7 @@
 
 <?php $hubTitle = $this->related->getHubTitle(); ?>
 <?php $hubUri = $this->related->getHubUri(); ?>
+<?php $explorerUrl = $this->related->getExplorerUrl(); ?>
 <?php if ($hubUri): ?>
   <div class="bibframe-hub-primary mb-2">
     <small class="text-muted">
@@ -12,6 +13,13 @@
               target="_blank" rel="noopener">
         <?=$this->escapeHtml($hubTitle ?? 'View Hub')?>
       </a>
+      <?php if ($explorerUrl): ?>
+        &middot; <a href="<?=$this->escapeHtmlAttr($explorerUrl)?>"
+                    target="_blank" rel="noopener"
+                    title="<?=$this->transEscAttr('Open this work\'s bibliographic family in the explorer')?>">
+          <?=$this->transEsc('Explore family')?> &#8599;
+        </a>
+      <?php endif; ?>
     </small>
   </div>
 <?php elseif ($hubTitle): ?>

@@ -9,19 +9,10 @@
     with DuckDB-WASM against [jimfhahn/lc-bibframe-hubs](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs)
     (2.9M Hubs, 544K typed relations, LC bulk dump 2026-05-05).
 
-    **Design.** Arastoopoor (2022, *Library Hi Tech* 40:1) found that users with no particular
-    item in mind draw a **top-down** family — work → expressions, skipping manifestations — while
-    users with a specific need navigate **bottom-up**, from the translation or format they want
-    up to the work and across to its siblings. Pauman Budanović & Žumer (2021, *CCQ* 59:7) make the
-    bibliographic family the organizing unit of an IFLA-LRM interface, with typed relationships as
-    first-class objects. Merčun, Žumer & Aalberg's **FrbrVis** studies (*JASIST* 2017; *J. Doc.* 2016)
-    compared indented tree, radial tree, circle-pack and sunburst layouts for FRBR work families and
-    found the **indented tree** the most successful — it reads like a table, so metadata columns sit
-    right beside the hierarchy. This notebook does all of that: pick *any* Hub (even a translation), the
-    notebook climbs to the family root, then lays the family out top-down — indented tree by default,
-    tidy tree and force graph for comparison — with the
-    [VuFind plugin's](https://github.com/jimfhahn/vufind-bf-hubs-plugin) surprise tiers
-    deciding what is foregrounded.
+    Pick *any* Hub — even a translation — and the notebook climbs to the family root, then lays the
+    family out top-down with the [VuFind plugin's](https://github.com/jimfhahn/vufind-bf-hubs-plugin)
+    surprise tiers deciding what is foregrounded. Why it is built this way is in
+    [Design notes](#design-notes) at the end.
 
     A *Hub* is the BIBFRAME equivalent of a MARC name/title authority heading given a URI
     ([primer](https://bibframe.org/docs/view/documentation-bf-primer/appendix-a-more-about-hubs.md)).
@@ -196,15 +187,14 @@
     Click any title to re-root on it — families overlap, and following a film adaptation into
     *its* family is where the interesting connections show up. Shift-click opens `id.loc.gov`.
 
-    Three layouts: the **indented tree** (FrbrVis's winner — hierarchy plus columns for
-    relationship, author, medium, connectivity), a **tidy tree** (pure hierarchy), and a
-    **force graph** (the usual "related works" hairball, for contrast).
+    Two layouts: the **indented tree** (FrbrVis's winner — hierarchy plus columns for
+    relationship, author, medium, connectivity) and a **tidy tree** (pure hierarchy).
   </script>
   <script id="15" type="module" pinned>
     const shown = view(Inputs.checkbox(["Derivative works", "Expressions", "Series & parts", "Other related"], {
       label: "Show", value: ["Derivative works", "Series & parts", "Other related"]
     }));
-    const layout = view(Inputs.radio(["Indented tree", "Tidy tree", "Force graph"], {label: "Layout", value: "Indented tree"}));
+    const layout = view(Inputs.radio(["Indented tree", "Tidy tree"], {label: "Layout", value: "Indented tree"}));
   </script>
   <script id="16" type="module">
     const groups = d3.groups(family, (d) => d.group);
@@ -282,7 +272,7 @@
       });
       display(html`<div style="overflow-x:auto"><table style="border-collapse:collapse;font:13px sans-serif;min-width:100%">${head}${rootRow}${body}</table></div>`);
     }
-    else if (layout === "Tidy tree") {
+    else {
       const root = d3.hierarchy(treeData);
       // Fixed column spacing; the SVG grows to fit and scrolls horizontally on narrow screens.
       const left = 24, right = 440, dx = 16, dy = 200;
@@ -319,28 +309,6 @@
         .style("cursor", (d) => d.data.hub_id && !d.data.root ? "pointer" : null)
         .on("click", (e, d) => d.data.hub_id && !d.data.root && onClick(e, d.data));
       display(html`<div style="overflow-x:auto;max-width:100%">${svg.node()}</div>`);
-    } else {
-      const leaves = treeData.children.flatMap((g) => g.children);
-      const nodes = [{id: treeData.hub_id, title: treeData.name, root: true, tier: 0}, ...leaves.map((d) => ({id: d.hub_id, ...d}))];
-      const links = leaves.map((d) => ({source: treeData.hub_id, target: d.hub_id, tier: d.tier}));
-      const height = Math.max(420, Math.min(900, 300 + nodes.length * 6));
-      const sim = d3.forceSimulation(nodes)
-        .force("link", d3.forceLink(links).id((d) => d.id).distance((d) => 60 + d.tier * 25))
-        .force("charge", d3.forceManyBody().strength(-120))
-        .force("center", d3.forceCenter(width / 2, height / 2))
-        .force("collide", d3.forceCollide(14));
-      const svg = d3.create("svg").attr("width", width).attr("height", height).attr("viewBox", [0, 0, width, height]).style("font", "11px sans-serif");
-      const link = svg.append("g").attr("stroke-opacity", 0.5).selectAll("line").data(links).join("line").attr("stroke", (d) => TIER_COLOR[d.tier]).attr("stroke-width", (d) => d.tier <= 2 ? 2 : 1);
-      const node = svg.append("g").selectAll("g").data(nodes).join("g").style("cursor", (d) => d.root ? null : "pointer").on("click", (e, d) => !d.root && onClick(e, d));
-      node.append("circle").attr("r", (d) => d.root ? 9 : 5).attr("fill", (d) => d.root ? "#222" : TIER_COLOR[d.tier]);
-      node.append("title").text((d) => d.root ? d.title : tooltip(d));
-      node.append("text").attr("x", 8).attr("dy", "0.32em").text((d) => d.root ? d.title : label(d)).attr("font-weight", (d) => d.root ? "bold" : null);
-      sim.on("tick", () => {
-        link.attr("x1", (d) => d.source.x).attr("y1", (d) => d.source.y).attr("x2", (d) => d.target.x).attr("y2", (d) => d.target.y);
-        node.attr("transform", (d) => `translate(${d.x},${d.y})`);
-      });
-      invalidation.then(() => sim.stop());
-      display(svg.node());
     }
   </script>
   <script id="19" type="text/markdown">
@@ -375,5 +343,31 @@
       plugin — change them there first.
     - Ideas: colour by `degree`, add a second hop for tier-1/2 members, show `rel_type_freq.parquet`
       as a rarity bar, or diff two families side by side.
+  </script>
+  <script id="22" type="text/markdown">
+    ---
+
+    ## Design notes
+
+    **Bottom-up *and* top-down.** Arastoopoor (2022, *Library Hi Tech* 40:1) found that users with
+    no particular item in mind draw a **top-down** family — work → expressions, skipping
+    manifestations — while users with a specific need navigate **bottom-up**, from the translation
+    or format they want up to the work and across to its siblings. Hence the climb in step 2 and
+    the "you started here" marker.
+
+    **The family as the unit.** Pauman Budanović & Žumer (2021, *CCQ* 59:7) make the bibliographic
+    family the organizing unit of an IFLA-LRM interface, with typed relationships as first-class
+    objects — which is why relationship type, not just the neighbouring title, is a column.
+
+    **Indented tree first.** Merčun, Žumer & Aalberg's **FrbrVis** studies (*JASIST* 2017;
+    *J. Doc.* 2016) compared indented tree, radial tree, circle-pack and sunburst layouts for FRBR
+    work families and found the **indented tree** the most successful — it reads like a table, so
+    metadata columns sit right beside the hierarchy. The tidy tree is kept for comparison; a
+    sunburst (their co-winner) is the obvious next layout for a second hop.
+
+    **Data.** [jimfhahn/lc-bibframe-hubs](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs)
+    on Hugging Face — the LC bulk dump converted to Parquet; see the dataset card for schema and
+    provenance. Source for this notebook and the companion VuFind plugin:
+    [jimfhahn/vufind-bf-hubs-plugin](https://github.com/jimfhahn/vufind-bf-hubs-plugin).
   </script>
 </notebook>

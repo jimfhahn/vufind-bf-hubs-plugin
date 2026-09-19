@@ -16,8 +16,8 @@ Bibliographic-family view of any Hub:
    supported and the entry point is marked.
 3. **Top-down layout** of the one-hop family, grouped into *Derivative
    works* (surprise tiers 1–3, coloured), *Expressions* (collapsed by
-   default), *Series & parts*, *Other related*. Three layouts:
-   **indented tree** (default), tidy tree, force graph.
+   default), *Series & parts*, *Other related*. Two layouts:
+   **indented tree** (default) and tidy tree.
 4. **Flat table** of the same rows with `id.loc.gov` links.
 
 Click a title to re-root; shift-click opens `id.loc.gov`. Surprise tiers

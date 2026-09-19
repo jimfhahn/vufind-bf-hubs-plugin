@@ -27,6 +27,9 @@ class BibframeHub implements RelatedInterface
     protected ?string $cachePath = null;
     protected int $maxDisplayResults = 15;
 
+    /** Base URL of the hosted Hub family explorer notebook (empty = no link). */
+    protected string $explorerUrl = '';
+
     /** Runtime cache of URI validation results */
     protected array $validationCache = [];
 
@@ -61,6 +64,7 @@ class BibframeHub implements RelatedInterface
         $this->cachePath = $display['validationCachePath'] ?? null;
         $this->emptyRdfCacheTtl = (int)($display['emptyRdfCacheTtl'] ?? 86400);
         $this->emptyRdfCachePath = $display['emptyRdfCachePath'] ?? null;
+        $this->explorerUrl = trim((string)($display['explorerUrl'] ?? ''));
     }
 
     /**
@@ -216,6 +220,22 @@ class BibframeHub implements RelatedInterface
     public function getHubTitle(): ?string
     {
         return $this->hubTitle;
+    }
+
+    /**
+     * Deep link into the hosted family-explorer notebook for the matched Hub,
+     * or null when no explorer is configured / no Hub was resolved.
+     */
+    public function getExplorerUrl(): ?string
+    {
+        if ($this->explorerUrl === '' || !$this->hubUri) {
+            return null;
+        }
+        $id = basename(rtrim($this->hubUri, '/'));
+        if (!preg_match('/^[0-9a-f-]{36}$/', $id)) {
+            return null;
+        }
+        return $this->explorerUrl . (str_contains($this->explorerUrl, '?') ? '&' : '?') . 'hub=' . $id;
     }
 
     /**
