@@ -17,7 +17,7 @@ class BibframeHubFactory implements FactoryInterface
 
         return new BibframeHub(
             $container->get('BibframeHub\Connection\HubClient'),
-            $container->get('BibframeHub\Graph\Neo4jService'),
+            $container->get('BibframeHub\Graph\HubStoreInterface'),
             new \BibframeHub\Graph\HubRdfParser($config['Connection'] ?? []),
             new \BibframeHub\Relationship\RelationshipInferrer(),
             $config

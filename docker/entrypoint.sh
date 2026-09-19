@@ -52,6 +52,22 @@ if [ "$TABLE_COUNT" -lt 5 ]; then
   mariadb -h db -u root -proot vufind -e "INSERT IGNORE INTO migrations(name, status, target_version) VALUES ('mysql.sql', 'success', '11.0.2');"
 fi
 
+# ── Load BIBFRAME Hub tables for the SQL backend (once, if the TSV export is mounted) ──
+if [ -r /hub-data/hubs.tsv ]; then
+  HUB_ROWS=$(mariadb -h db -u vufind -pvufind vufind -N -e "SELECT COUNT(*) FROM bibframehub_hub" 2>/dev/null || echo "0")
+  if [ "${HUB_ROWS:-0}" -lt 1000 ]; then
+    echo "Loading BIBFRAME Hub tables from /hub-data (takes ~5 minutes)..."
+    cd "$VUFIND_HOME"
+    php -d memory_limit=1G public/index.php bibframehub/load-hubs --dir /hub-data --recreate \
+      || echo "WARNING: Hub table load failed; the SQL backend will be empty."
+    rm -f /vufind-local/cache/bibframehub_rel_frequencies.json
+  else
+    echo "BIBFRAME Hub tables already loaded ($HUB_ROWS hubs)."
+  fi
+else
+  echo "No /hub-data/hubs.tsv mounted; SQL Hub store will be empty (fast-lane + live RDF only)."
+fi
+
 # ── Load test MARC records into Solr ──
 RECORD_COUNT=$(curl -s "http://localhost:8983/solr/biblio/select?q=*:*&rows=0&wt=json" 2>/dev/null | grep -o '"numFound":[0-9]*' | grep -o '[0-9]*' || echo "0")
 if [ "$RECORD_COUNT" -lt 1 ]; then

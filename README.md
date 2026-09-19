@@ -15,7 +15,7 @@ A VuFind plugin that surfaces **surprising, non-obvious work relationships** usi
 
 ## Quick Start (Docker)
 
-The fastest way to see the plugin in action. Requires Docker and a running Neo4j instance with the BIBFRAME Hubs dataset (see [Neo4j Setup](#neo4j-setup) below).
+The fastest way to see the plugin in action. Requires Docker only. For legacy records (no Hub URI in the MARC) to resolve, also export the Hub tables once — see [Hub Store Setup](#hub-store-setup) — and the container loads them into MariaDB on first boot.
 
 ```bash
 git clone https://github.com/jimfhahn/vufind-bf-hubs-plugin.git
@@ -41,15 +41,15 @@ The full showcase set spans 19 works by diverse voices — Morrison, Walker, Ell
 - [The Great Gatsby](http://localhost:4567/vufind/Record/test-gatsby-001)
 - [Palinuro of Mexico](http://localhost:4567/vufind/Record/test-palinuro-001) — Modern MARC fast lane (Hub URI from 240 `$1`)
 
-The Docker setup includes VuFind (PHP 8.3 + Apache), MariaDB, and embedded Solr. Neo4j runs on the host and is accessed via `host.docker.internal`.
+The Docker setup includes VuFind (PHP 8.3 + Apache), MariaDB, and embedded Solr. The Hub tables live in that same MariaDB; no Neo4j is needed.
 
-> **Note on the graph back-end:** at runtime the plugin's *primary* data path is **live RDF/XML from `id.loc.gov`** for whichever Hub the record resolves to. Neo4j is used as a fallback (when the live RDF is empty or unreachable) and as a metadata cache for related-Hub titles, agents, and media types during scoring. The full bulk-imported graph is **not strictly required** to run the plugin against modern MARC records that carry a Hub URI in 240/130 `$1`; it becomes important for legacy records that depend on title/LCCN lookup, and for fully-populated scoring of related Hubs.
+> **Note on the graph back-end:** at runtime the plugin's *primary* data path is **live RDF/XML from `id.loc.gov`** for whichever Hub the record resolves to. The local Hub store (SQL tables by default, or Neo4j) is used as a fallback (when the live RDF is empty or unreachable) and as a metadata cache for related-Hub titles, agents, and media types during scoring. It is **not strictly required** to run the plugin against modern MARC records that carry a Hub URI in 240/130 `$1`; it becomes important for legacy records that depend on title/LCCN lookup, and for fully-populated scoring of related Hubs.
 
 ## Limitations & Known Caveats
 
 This is a working prototype shared for community feedback. Known constraints:
 
-- **Graph load is heavy.** Legacy MARC records (no Hub URI in the MARC) depend on a Neo4j graph built from the LC bulk dump (~5.4GB decompressed, ~30–60 min import). Modern MARC records carrying a Hub URI in 240/130 `$1` work without the full graph.
+- **Hub tables must be loaded once.** Legacy MARC records (no Hub URI in the MARC) depend on a local copy of the LC Hubs graph. The default `sql` backend loads ~3.5M rows into VuFind's own MariaDB from the [Hugging Face Parquet export](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs) in ~5 minutes; the legacy Neo4j backend needs a ~40-minute n10s import. Modern MARC records carrying a Hub URI in 240/130 `$1` work without either.
 - **Depends on `id.loc.gov` availability.** The primary data path and the URI-validation step both call `id.loc.gov`. If LC is slow or unreachable, related works may be sparse or absent (results are cached to soften this).
 - **URI validation uses the `.rdf` representation.** LC serves the human-readable `.html` view behind a WAF that returns HTTP 403 to non-browser clients, so validation HEAD-checks `{hubUri}.rdf` (200 = live, 404 = missing) instead.
 - **Tested against VuFind 11.0.2 only.** Other 11.x releases may work but are untested; earlier major versions are not tested.
@@ -61,7 +61,7 @@ This is a working prototype shared for community feedback. Known constraints:
 ### Prerequisites
 
 - VuFind 11.x (developed and tested against 11.0.2; other versions may work but are untested)
-- Neo4j 5.x with the [n10s](https://neo4j.com/labs/neosemantics/) plugin and the BIBFRAME Hubs dataset loaded (see [Neo4j Setup](#neo4j-setup))
+- Python 3.10+ with `duckdb` to export the Hub tables (see [Hub Store Setup](#hub-store-setup)); or, legacy, Neo4j 5.x with the [n10s](https://neo4j.com/labs/neosemantics/) plugin
 - PHP 8.1+ (tested on 8.3)
 
 ### 1. Clone the plugin
@@ -108,13 +108,16 @@ composer dump-autoload
 cp /path/to/your/vufind-bf-hubs-plugin/config/BibframeHub.ini /path/to/vufind/local/config/vufind/BibframeHub.ini
 ```
 
-Edit `BibframeHub.ini` and set your Neo4j connection details (the plugin
-uses Neo4j's HTTP API, not Bolt):
+The defaults use the `sql` Hub store (tables in VuFind's own database; see
+[Hub Store Setup](#hub-store-setup)). To use a Neo4j graph instead:
 
 ```ini
+[HubStore]
+backend = "neo4j"
+
 [Neo4j]
 enabled = true
-uri = "http://localhost:7474"
+uri = "http://localhost:7474"        ; HTTP API, not Bolt
 username = "neo4j"
 password = "your_neo4j_password"
 database = "neo4j"
@@ -152,11 +155,50 @@ VUFIND_HOME=/path/to/vufind VUFIND_LOCAL_DIR=/path/to/vufind/local \
 
 The "Related Works" panel will appear in the sidebar of any record page where a matching BIBFRAME Hub is found.
 
-## Neo4j Setup
+## Hub Store Setup
 
-The plugin requires a Neo4j graph database loaded with the LC BIBFRAME Hubs dataset.
+The plugin needs a local copy of the LC Hubs graph for three things: resolving
+legacy records by LCCN/title, enriching related Hubs (titles, agents, media)
+during scoring, and falling back when `id.loc.gov` is slow or down. Two
+backends implement the same `HubStoreInterface`:
 
-### 1. Start Neo4j with n10s
+| `[HubStore] backend` | Storage | Load time | Extra services |
+|---|---|---|---|
+| `sql` (default) | 3 tables in VuFind's MariaDB/MySQL (~3.5M rows, ~1 GB) | ~5 min | none |
+| `neo4j` (legacy) | n10s graph, 37M nodes | ~40 min | Neo4j + 4 GB heap |
+
+### SQL backend (recommended)
+
+1. Export TSVs from the published Parquet (reads straight from Hugging Face;
+   ~1 minute, ~600 MB output):
+
+   ```bash
+   cd tools/hf-dataset
+   python3 -m venv .venv && .venv/bin/pip install duckdb
+   .venv/bin/python export_sql_tsv.py --out sql-out          # from hf://datasets/jimfhahn/lc-bibframe-hubs
+   ```
+
+2. Load them into VuFind's database (creates `bibframehub_hub`,
+   `bibframehub_agent`, `bibframehub_relation`):
+
+   ```bash
+   cd /path/to/vufind
+   php -d memory_limit=1G public/index.php bibframehub/load-hubs --dir /path/to/sql-out
+   rm -f local/cache/bibframehub_rel_frequencies.json
+   ```
+
+   In the Docker demo this happens automatically on first boot when
+   `tools/hf-dataset/sql-out/` exists (it is mounted at `/hub-data`).
+
+3. Refresh after an LC re-publish by re-running both steps (`--recreate`
+   after schema changes).
+
+### Neo4j backend (legacy)
+
+Kept for installations that already run the n10s graph. Set
+`[HubStore] backend = "neo4j"` and `[Neo4j] enabled = true`, then:
+
+#### 1. Start Neo4j with n10s
 
 ```bash
 docker run -d --name neo4j-hubs \
@@ -167,7 +209,7 @@ docker run -d --name neo4j-hubs \
   neo4j:5.26
 ```
 
-### 2. Download the BIBFRAME Hubs dataset
+#### 2. Download the BIBFRAME Hubs dataset
 
 ```bash
 mkdir -p data
@@ -178,7 +220,7 @@ gunzip data/hubs.bibframe.ttl.gz
 
 This is ~700MB compressed, ~5.4GB decompressed.
 
-### 3. Configure n10s and import
+#### 3. Configure n10s and import
 
 Open the Neo4j browser at http://localhost:7474 and run:
 
@@ -199,7 +241,7 @@ CALL n10s.rdf.import.fetch(
 );
 ```
 
-### 4. Create indexes
+#### 4. Create indexes
 
 ```cypher
 CREATE INDEX hub_uri FOR (h:ns0__Hub) ON (h.uri);
@@ -221,17 +263,18 @@ and ~152.6M triples — close to LC's reported live Hub population
 
 ## Graph Back-End
 
-The Neo4j graph is a *cache* layered on top of `id.loc.gov`, not a source of
-truth. At runtime the plugin's primary data path is live RDF from
-`id.loc.gov/{hubUri}.rdf`; Neo4j is consulted for:
+The local Hub store is a *cache* layered on top of `id.loc.gov`, not a source
+of truth. At runtime the plugin's primary data path is live RDF from
+`id.loc.gov/{hubUri}.rdf`; the store (`HubStoreInterface`, implemented by
+`SqlHubStore` and `Neo4jService`) is consulted for:
 
 - Legacy MARC title/LCCN → Hub URI resolution
 - Related-Hub metadata enrichment (titles, agents, media types) during scoring
 - Relationship-type frequency statistics for the rarity bonus (24h cached)
 - Fallback relationship traversal when live RDF is empty/unreachable
 
-The LC bulk dump is published periodically; refresh by re-running the import
-above and clearing the plugin's caches
+The LC bulk dump is published periodically; refresh by re-running the load
+(see [Hub Store Setup](#hub-store-setup)) and clearing the plugin's caches
 (`bibframehub_rel_frequencies.json`, `bibframehub_empty_rdf.json`,
 `bibframehub_uri_validation.json` in the VuFind `local/cache/` directory).
 
@@ -275,7 +318,7 @@ A patron viewing *Pride and Prejudice* should see derivatives and parodies, amon
    - **Legacy**: LCCN → Neo4j lookup → title search → LC suggest2 API
 2. **RDF-first**: Fetch live RDF/XML from `id.loc.gov/{hubUri}.rdf` → parse typed relationships.
 3. **Base-work recovery**: If the resolved Hub has no relationships (e.g. suggest2 returned a collected-works edition), strip AAP qualifiers and look up the canonical base work via the label endpoint.
-4. **Neo4j fallback**: If RDF is unavailable for all candidate URIs, query the graph using the reified relation pattern `(:Hub)-[:relation]->(:Relation)-[:associatedResource]->(:Hub)` (traversed both directions; relationship type read from the `bf:Relation`'s `bf:relationship` URI).
+4. **Local store fallback**: If RDF is unavailable for all candidate URIs, query the local Hub store (SQL tables, or the Neo4j reified pattern `(:Hub)-[:relation]->(:Relation)-[:associatedResource]->(:Hub)` traversed both directions).
 5. **Surprise scoring**: Score each related Hub on a 0–100 scale using four signals.
 6. **Display**: Render grouped results in a collapsible tree in the record sidebar.
 
@@ -345,11 +388,11 @@ Based on `rdf:type` on Hub nodes: `MovingImage`, `Audio`, `NotatedMusic`, `Multi
 | 15 | `translationOf` | Stolz und Vorurteil |
 | 15 | `translationOf` | 傲慢与偏见 |
 
-## Neo4j Graph (BIBFRAME Hubs Dataset)
+## Neo4j Graph (BIBFRAME Hubs Dataset) — legacy backend
 
 ### Setup
 
-See [Neo4j Setup](#neo4j-setup) above for the full bootstrap. Quick recap
+See [Hub Store Setup](#hub-store-setup) above for the full bootstrap. Quick recap
 (`bibframe123` is the demo default that matches
 `docker/local/config/vufind/BibframeHub.ini` — use your own password in
 production):
@@ -497,12 +540,18 @@ vufind-bf-hubs-plugin/
 │   ├── Module.php                     ← Laminas module bootstrap
 │   ├── config/module.config.php       ← service/plugin registration
 │   └── src/BibframeHub/
+│       ├── Command/
+│       │   ├── LoadHubsCommand.php    ← `bibframehub/load-hubs`: TSV → MariaDB tables
+│       │   └── LoadHubsCommandFactory.php
 │       ├── Connection/
 │       │   ├── HubClient.php          ← LC suggest2/label API client + base-work recovery
 │       │   └── HubClientFactory.php
 │       ├── Graph/
 │       │   ├── HubRdfParser.php       ← id.loc.gov RDF/XML fetcher + parser
-│       │   ├── Neo4jService.php       ← Neo4j HTTP API client (graph queries)
+│       │   ├── HubStoreInterface.php  ← local graph store contract
+│       │   ├── HubStoreFactory.php    ← picks sql | neo4j | none from [HubStore]
+│       │   ├── SqlHubStore.php        ← tables in VuFind's DB (default backend)
+│       │   ├── Neo4jService.php       ← Neo4j HTTP API client (legacy backend)
 │       │   └── Neo4jServiceFactory.php
 │       ├── Related/
 │       │   ├── BibframeHub.php        ← VuFind Related plugin (orchestrator)
@@ -530,10 +579,11 @@ vufind-bf-hubs-plugin/
 
 The LC bulk dump is published periodically. To refresh:
 
-1. Re-download `hubs.bibframe.ttl.gz` and decompress.
-2. Stop the existing `neo4j-hubs` container, delete its volume, re-create it.
-3. Re-run the n10s init + import + index commands from [Neo4j Setup](#neo4j-setup).
-4. Clear the plugin caches inside the VuFind container:
+1. Re-run `tools/hf-dataset/ttl_to_parquet.py` on the new `hubs.bibframe.ttl.gz`
+   and `hf upload` the result (or wait for the published dataset to update).
+2. `export_sql_tsv.py` → `bibframehub/load-hubs --recreate` (SQL backend), or
+   re-run the n10s import (Neo4j backend).
+3. Clear the plugin caches inside the VuFind container:
    `rm /vufind-local/cache/bibframehub_*.json`.
 
 No separate reconciliation step is required — LC's published snapshot now
@@ -551,11 +601,14 @@ userAgent = "VuFind-BibframeHub/1.0"
 timeout = 10
 
 [Neo4j]
-enabled = true                      ; Set to false to disable graph queries
+enabled = false                     ; Legacy backend; only used when [HubStore] backend = "neo4j"
 uri = "http://localhost:7474"       ; Neo4j HTTP API endpoint (the plugin uses cURL, not Bolt)
 username = "neo4j"
 password = "your_password"
 database = "neo4j"
+
+[HubStore]
+backend = "sql"                     ; sql (tables in VuFind's DB, default) | neo4j | none
 
 [Display]
 validateUris = true                 ; HEAD-check URIs before displaying links

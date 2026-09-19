@@ -4,14 +4,15 @@ namespace BibframeHub\Related;
 
 use BibframeHub\Connection\HubClient;
 use BibframeHub\Graph\HubRdfParser;
-use BibframeHub\Graph\Neo4jService;
+use BibframeHub\Graph\HubStoreInterface;
 use BibframeHub\Relationship\RelationshipInferrer;
 use VuFind\Related\RelatedInterface;
 
 class BibframeHub implements RelatedInterface
 {
     protected HubClient $hubClient;
-    protected Neo4jService $neo4j;
+    /** Local graph store (Neo4j or SQL tables) used for resolution, enrichment and fallback. */
+    protected HubStoreInterface $neo4j;
     protected HubRdfParser $rdfParser;
     protected RelationshipInferrer $scorer;
 
@@ -46,7 +47,7 @@ class BibframeHub implements RelatedInterface
 
     public function __construct(
         HubClient $hubClient,
-        Neo4jService $neo4j,
+        HubStoreInterface $neo4j,
         HubRdfParser $rdfParser,
         RelationshipInferrer $scorer,
         array $config = []

@@ -14,6 +14,7 @@ n10s import).
 | File | Purpose |
 |---|---|
 | `ttl_to_parquet.py` | The converter. Writes `hubs.parquet`, `hubs_connected.parquet`, `relations.parquet`, `rel_type_freq.parquet`. |
+| `export_sql_tsv.py` | Reads the Parquet (from Hugging Face by default, or `--source out`) and writes `hubs.tsv`, `agents.tsv`, `relations.tsv` for the plugin's `bibframehub/load-hubs` command — the SQL Hub store that replaces Neo4j. |
 | `export_parquet.py` | Alternative exporter that streams from a running n10s Neo4j instance instead of the TTL. Same output schema; kept for cross-checking. |
 | `dataset_card.md` | The Hugging Face dataset card (`README.md` in the repo). Column reference, provenance, example DuckDB queries. |
 | `requirements.txt` | `neo4j`, `pyarrow`, `duckdb`, `huggingface_hub` (+ `pyoxigraph` for the TTL path). |

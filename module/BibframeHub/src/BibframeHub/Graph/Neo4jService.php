@@ -12,7 +12,7 @@ use VuFind\Log\LoggerAwareTrait;
  * All data lives under n10s namespace-shortened labels: ns0__Hub, ns1__Relationship, etc.
  * This service is read-only — we never write to the graph.
  */
-class Neo4jService implements LoggerAwareInterface
+class Neo4jService implements HubStoreInterface, LoggerAwareInterface
 {
     use LoggerAwareTrait;
 

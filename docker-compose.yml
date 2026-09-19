@@ -18,6 +18,9 @@ services:
       - ./data/showcase:/data/showcase:ro
       # Mount the loader script
       - ./docker/load-showcase-marc.php:/usr/local/bin/load-showcase-marc.php:ro
+      # Hub tables for the SQL backend: TSVs from tools/hf-dataset/export_sql_tsv.py
+      # (auto-loaded into MariaDB on first boot if present; see entrypoint.sh)
+      - ./tools/hf-dataset/sql-out:/hub-data:ro
       # Persist Solr data
       - solr-data:/usr/local/vufind/solr/vufind/biblio/index
       # Persist logs
