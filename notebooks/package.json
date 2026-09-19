@@ -1,0 +1,12 @@
+{
+  "name": "bibframe-hub-notebooks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview": "notebooks preview --root .",
+    "build": "notebooks build --root . -- *.html"
+  },
+  "dependencies": {
+    "@observablehq/notebook-kit": "^2.6.4"
+  }
+}

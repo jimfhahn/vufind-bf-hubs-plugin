@@ -1,0 +1,379 @@
+<!doctype html>
+<notebook theme="air">
+  <title>BIBFRAME Hub family explorer</title>
+  <script id="1" type="text/markdown">
+    # BIBFRAME Hub family explorer
+
+    Browse Library of Congress **BIBFRAME Hubs** as *bibliographic families*, straight from
+    Parquet on Hugging Face — no graph database, no server. Everything runs in your browser
+    with DuckDB-WASM against [jimfhahn/lc-bibframe-hubs](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs)
+    (2.9M Hubs, 544K typed relations, LC bulk dump 2026-05-05).
+
+    **Design.** Arastoopoor (2022, *Library Hi Tech* 40:1) found that users with no particular
+    item in mind draw a **top-down** family — work → expressions, skipping manifestations — while
+    users with a specific need navigate **bottom-up**, from the translation or format they want
+    up to the work and across to its siblings. Pauman Budanović & Žumer (2021, *CCQ* 59:7) make the
+    bibliographic family the organizing unit of an IFLA-LRM interface, with typed relationships as
+    first-class objects. Merčun, Žumer & Aalberg's **FrbrVis** studies (*JASIST* 2017; *J. Doc.* 2016)
+    compared indented tree, radial tree, circle-pack and sunburst layouts for FRBR work families and
+    found the **indented tree** the most successful — it reads like a table, so metadata columns sit
+    right beside the hierarchy. This notebook does all of that: pick *any* Hub (even a translation), the
+    notebook climbs to the family root, then lays the family out top-down — indented tree by default,
+    tidy tree and force graph for comparison — with the
+    [VuFind plugin's](https://github.com/jimfhahn/vufind-bf-hubs-plugin) surprise tiers
+    deciding what is foregrounded.
+
+    A *Hub* is the BIBFRAME equivalent of a MARC name/title authority heading given a URI
+    ([primer](https://bibframe.org/docs/view/documentation-bf-primer/appendix-a-more-about-hubs.md)).
+    In LRM terms the family root is the *Work*; Hubs that point at it with `translationof` /
+    `arrangementof` are its *Expressions*; everything else (`adaptedasmotionpicture`, `sequel`,
+    `parodyof`, …) is a related Work in the same family.
+  </script>
+  <script id="2" type="module" pinned>
+    // Load the two Parquet files into an in-browser DuckDB. ~97 MB on first load; the CDN
+    // serves them with CORS + range support so nothing needs to be proxied.
+    const DATASET = "https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs/resolve/main/";
+    const db = await DuckDBClient.of();
+    const t0 = performance.now();
+    display(html`<p>Loading <code>relations.parquet</code> and <code>hubs_connected.parquet</code>…`);
+    await db.query(`CREATE TABLE rels AS SELECT source_id, target_id, rel_type FROM read_parquet('${DATASET}relations.parquet')`);
+    await db.query(`CREATE TABLE hubs AS SELECT hub_id, title, marc_key, media, agents FROM read_parquet('${DATASET}hubs_connected.parquet')`);
+    await db.query(`CREATE TABLE deg AS SELECT id, count(*) AS n FROM (SELECT source_id AS id FROM rels UNION ALL SELECT target_id FROM rels) GROUP BY id`);
+    const counts = await db.queryRow(`SELECT (SELECT count(*) FROM hubs) AS hubs, (SELECT count(*) FROM rels) AS rels`);
+    display(html`<p>Ready: ${counts.hubs.toLocaleString()} connected Hubs, ${counts.rels.toLocaleString()} relations, ${((performance.now() - t0) / 1000).toFixed(1)}s.`);
+  </script>
+  <script id="3" type="module">
+    // Surprise tiers — copied verbatim from RelationshipInferrer.php so the notebook and the
+    // VuFind plugin agree on what counts as a surprising relationship.
+    const TIERS = {
+      1: ["inspirationfor", "inspiredby", "parodyof", "imitationof", "derivative", "graphicnovelizationof",
+          "novelizationof", "critiqueof", "commentaryon", "analysisof"],
+      2: ["adaptedasmotionpicture", "motionpictureadaptationof", "adaptedastelevisionprogram", "televisionadaptationof",
+          "operaadaptationof", "musicaltheatreadaptationof", "musicaltheatreadaptionof", "adaptedasmusicaltheatre",
+          "variationsbasedon", "musicalvariationsbasedon", "dramatizationof", "radioadaptationof", "adaptedaslibretto",
+          "verseadaptationof", "musicalsettingof", "settomusicas", "oratorioadaptationof", "incidentalmusicfor",
+          "cadenzacomposedfor", "musicalvariations", "motionpicturescreenplaybasedon", "screenplayformotionpicture",
+          "librettobasedon"],
+      3: ["sequel", "sequelto", "prequel", "prequelto", "basedon", "adaptedas", "adaptationof", "librettofor", "libretto", "remakeof"],
+      4: ["continuedby", "continuationof", "continues", "precededby", "preceededby", "succeededby", "expandedas",
+          "expandedversionof", "abridgedas", "abridgementof", "revisionof", "revisedas", "augmentationof", "augmentedby",
+          "complementedby", "supplementto", "supplement", "mergerof", "mergedtoform", "replacementof", "replacedby",
+          "paraphraseof", "freetranslationof", "absorbedby", "absorptionof", "separatedfrom", "continuedinpartby"],
+      5: ["translator", "translationof", "translatedas", "editor", "compiler", "editorofcompilation", "inseries",
+          "containedin", "containerof", "contains", "subseriesof", "seriescontainerof", "issuedas", "author", "creator",
+          "contributor", "publisher", "issuingbody", "sponsoringbody", "founder", "filmdirector", "performer", "actor",
+          "singer", "producer", "lyricist", "composer", "artist", "illustrator", "photographer", "host", "dedicatee",
+          "honouree", "addressee", "formerowner", "writerofaddedcommentary", "writerofintroduction",
+          "writerofsupplementarytextualcontent", "writerofaddedtext", "writerofforeword", "attributedname", "related",
+          "descriptionof", "setting", "musicformotionpicture", "motionpicturemusic", "musicfortelevisionprogram",
+          "incidentalmusic", "musicfor"]
+    };
+    const TIER_OF = new Map(Object.entries(TIERS).flatMap(([t, slugs]) => slugs.map((s) => [s, +t])));
+    const tierOf = (slug) => TIER_OF.get(slug) ?? 5;
+    const TIER_LABEL = {1: "Creative transformation", 2: "Cross-medium adaptation", 3: "Continuation / adaptation", 4: "Serial / structural", 5: "Predictable"};
+    const TIER_COLOR = {1: "#b2182b", 2: "#ef8a62", 3: "#d9a300", 4: "#67a9cf", 5: "#999999"};
+    const EXPRESSION_EDGES = new Set(["translationof", "arrangementof"]);
+    const SERIES_EDGES = new Set(["inseries", "containedin", "containerof", "contains", "subseriesof", "seriescontainerof", "issuedas"]);
+    const hubUrl = (id) => `https://id.loc.gov/resources/hubs/${id}`;
+    // "1001 $aAusten, Jane,$d1775-1817.$tPride and prejudice" → "Austen, Jane"; 130 headings have no $a name.
+    const authorOf = (marcKey) => {
+      if (!marcKey || !/^[17]/.test(marcKey)) return null;
+      const m = marcKey.match(/\$a([^$]+)/);
+      return m ? m[1].replace(/[,.;:\s]+$/, "") : null;
+    };
+    const rows = (table) => table.toArray().map((r) => {
+      const o = r.toJSON();
+      for (const k of ["media", "agents"]) if (o[k] != null) o[k] = Array.from(o[k]);
+      return o;
+    });
+  </script>
+  <script id="4" type="text/markdown">
+    ## 1. Find a Hub
+
+    Search by title or authorized access point. Candidates are ranked by how many relations
+    they participate in, so the family root usually comes first — but pick a translation
+    (e.g. *Pride and prejudice. Turkish*) to see the bottom-up climb.
+  </script>
+  <script id="5" type="module" pinned>
+    // Deep link: ?hub=<uuid> opens straight on that Hub (used by the VuFind plugin sidebar).
+    const hubParam = new URLSearchParams(location.search).get("hub");
+    const q = view(Inputs.text({label: "Search", placeholder: "title or author…", value: hubParam ? "" : "Pride and prejudice", submit: true}));
+  </script>
+  <script id="6" type="module">
+    const candidates = q.trim().length < 3 ? [] : rows(await db.query(
+      `SELECT h.hub_id, h.title, h.marc_key, h.media, coalesce(d.n, 0) AS degree
+       FROM hubs h LEFT JOIN deg d ON d.id = h.hub_id
+       WHERE h.title ILIKE ? OR h.marc_key ILIKE ?
+       ORDER BY degree DESC, h.title LIMIT 40`,
+      [`%${q.trim()}%`, `%${q.trim()}%`]
+    ));
+  </script>
+  <script id="7" type="module" pinned>
+    const chosen = view(Inputs.select(candidates, {
+      label: "Hub",
+      value: candidates[0],
+      format: (d) => `${d.title}  ·  ${d.marc_key ?? "—"}  ·  ${d.degree} links`
+    }));
+  </script>
+  <script id="8" type="module">
+    // The focused Hub. Set from the search box, and re-set when you click a node in the tree.
+    const focusId = Mutable(null);
+    const setFocus = (id) => {
+      if (id) history.replaceState(null, "", `?hub=${encodeURIComponent(id)}`);
+      return (focusId.value = id);
+    };
+  </script>
+  <script id="9" type="module">
+    setFocus(chosen?.hub_id ?? hubParam ?? null);
+  </script>
+  <script id="10" type="text/markdown">
+    ## 2. Climb to the family root (bottom-up)
+
+    Follow outgoing `translationof` / `arrangementof` edges until a Hub has none. That Hub is
+    treated as the LRM **Work** and becomes the root of the tree below.
+  </script>
+  <script id="11" type="module">
+    const climb = await (async () => {
+      if (!focusId) return null;
+      const path = [];
+      let cur = focusId;
+      const seen = new Set([cur]);
+      for (let i = 0; i < 8; i++) {
+        const row = await db.queryRow(
+          `SELECT r.target_id, r.rel_type, h.title FROM rels r JOIN hubs h ON h.hub_id = r.target_id
+           WHERE r.source_id = ? AND r.rel_type IN ('translationof', 'arrangementof') LIMIT 1`, [cur]);
+        if (!row || seen.has(row.target_id)) break;
+        path.push({from: cur, to: row.target_id, rel: row.rel_type, toTitle: row.title});
+        cur = row.target_id;
+        seen.add(cur);
+      }
+      const root = rows(await db.query(`SELECT * FROM hubs WHERE hub_id = ?`, [cur]))[0];
+      return {rootId: cur, root, path, entered: focusId};
+    })();
+  </script>
+  <script id="12" type="module">
+    if (!climb) display(html`<p><i>No Hub selected.</i>`);
+    else if (climb.path.length === 0) display(html`<p>You are at the family root: <b>${climb.root.title}</b> <small>(${climb.root.marc_key ?? ""})</small> · <a href=${hubUrl(climb.rootId)} target="_blank">id.loc.gov</a>`);
+    else display(html`<p>You entered via <b>${chosen?.title ?? climb.entered}</b>; climbed ${climb.path.map((p) => html`<code>${p.rel}</code> → <b>${p.toTitle}</b>`)}. Family root: <a href=${hubUrl(climb.rootId)} target="_blank">${climb.root.title}</a> <small>(${climb.root.marc_key ?? ""})</small>`);
+  </script>
+  <script id="13" type="module">
+    // One row per family member: every Hub one hop from the root, in either direction,
+    // deduplicated by Hub (keeping the most surprising relationship type).
+    const family = await (async () => {
+      if (!climb) return [];
+      const id = climb.rootId;
+      const raw = rows(await db.query(
+        `SELECT CASE WHEN r.source_id = ? THEN 'out' ELSE 'in' END AS dir, r.rel_type,
+                h.hub_id, h.title, h.marc_key, h.media, h.agents, coalesce(d.n, 0) AS degree
+         FROM rels r
+         JOIN hubs h ON h.hub_id = CASE WHEN r.source_id = ? THEN r.target_id ELSE r.source_id END
+         LEFT JOIN deg d ON d.id = h.hub_id
+         WHERE r.source_id = ? OR r.target_id = ?`, [id, id, id, id]));
+      const rootAgents = new Set(climb.root.agents ?? []);
+      const byHub = new Map();
+      for (const r of raw) {
+        const isExpression = (r.dir === "in" && EXPRESSION_EDGES.has(r.rel_type)) || (r.dir === "out" && r.rel_type === "translatedas");
+        const tier = tierOf(r.rel_type);
+        const group = isExpression ? "Expressions"
+          : tier <= 3 ? "Derivative works"
+          : (tier === 4 || SERIES_EDGES.has(r.rel_type)) ? "Series & parts"
+          : "Other related";
+        const agents = r.agents ?? [];
+        const sameAuthor = agents.length && rootAgents.size ? agents.some((a) => rootAgents.has(a)) : null;
+        const row = {...r, tier, group, sameAuthor, url: hubUrl(r.hub_id)};
+        const prev = byHub.get(r.hub_id);
+        if (!prev || row.tier < prev.tier) byHub.set(r.hub_id, row);
+      }
+      return [...byHub.values()].sort((a, b) => a.tier - b.tier || d3.ascending(a.title, b.title));
+    })();
+  </script>
+  <script id="14" type="text/markdown">
+    ## 3. The family, top-down
+
+    One branch per group. **Derivative works** are coloured by surprise tier and expanded by
+    default; **Expressions** (translations, arrangements) are the predictable part of the family
+    and start collapsed — unless you arrived through one, in which case it is shown and marked.
+    Click any title to re-root on it — families overlap, and following a film adaptation into
+    *its* family is where the interesting connections show up. Shift-click opens `id.loc.gov`.
+
+    Three layouts: the **indented tree** (FrbrVis's winner — hierarchy plus columns for
+    relationship, author, medium, connectivity), a **tidy tree** (pure hierarchy), and a
+    **force graph** (the usual "related works" hairball, for contrast).
+  </script>
+  <script id="15" type="module" pinned>
+    const shown = view(Inputs.checkbox(["Derivative works", "Expressions", "Series & parts", "Other related"], {
+      label: "Show", value: ["Derivative works", "Series & parts", "Other related"]
+    }));
+    const layout = view(Inputs.radio(["Indented tree", "Tidy tree", "Force graph"], {label: "Layout", value: "Indented tree"}));
+  </script>
+  <script id="16" type="module">
+    const groups = d3.groups(family, (d) => d.group);
+    const groupOrder = ["Derivative works", "Expressions", "Series & parts", "Other related"];
+    const legend = html`<div style="display:flex;gap:1em;flex-wrap:wrap;font:12px sans-serif;margin:0.5em 0">
+      ${[1, 2, 3, 4, 5].map((t) => html`<span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${TIER_COLOR[t]};margin-right:4px"></span>Tier ${t} — ${TIER_LABEL[t]}</span>`)}
+      <span>◐ different author &nbsp; ▣ different medium</span>
+      ${groupOrder.map((g) => { const n = groups.find(([k]) => k === g)?.[1].length ?? 0; return html`<span style="color:#666">${g}: ${n}</span>`; })}
+    </div>`;
+    display(legend);
+  </script>
+  <script id="17" type="module">
+    // If the user entered through an expression (bottom-up), keep that branch visible so
+    // they can see where they started relative to the rest of the family.
+    const enteredBelowRoot = climb && climb.entered !== climb.rootId;
+    const shownGroups = enteredBelowRoot ? [...new Set([...shown, "Expressions"])] : shown;
+    const treeData = climb && {
+      name: climb.root.title, hub_id: climb.rootId, root: true,
+      children: groupOrder
+        .filter((g) => shownGroups.includes(g))
+        .map((g) => ({name: g, children: (groups.find(([k]) => k === g)?.[1] ?? []).map((d) => ({...d, name: d.title}))}))
+        .filter((g) => g.children.length)
+    };
+    const label = (d) => {
+      const media = (d.media ?? []).filter((m) => m !== "Text");
+      const mediaMark = media.length && !(climb.root.media ?? []).some((m) => media.includes(m)) ? " ▣" : "";
+      const authorMark = d.sameAuthor === false ? " ◐" : "";
+      const author = authorOf(d.marc_key);
+      const rootAuthor = authorOf(climb.root.marc_key);
+      const t = d.title.length > 44 ? d.title.slice(0, 43) + "…" : d.title;
+      const by = author && author !== rootAuthor ? ` — ${author.length > 24 ? author.slice(0, 23) + "…" : author}` : "";
+      const here = d.hub_id === climb.entered ? "  ◀ you started here" : "";
+      return `${t}${by}${mediaMark}${authorMark}${here}`;
+    };
+    const tooltip = (d) => `${d.title}\n${d.marc_key ?? ""}\n${d.dir === "out" ? "root —" + d.rel_type + "→ this" : "this —" + d.rel_type + "→ root"}\nmedia: ${(d.media ?? []).join(", ") || "—"}\n${d.degree} links · tier ${d.tier}\n(click to re-root · shift-click opens id.loc.gov)`;
+    const onClick = (event, d) => {
+      if (event.shiftKey) window.open(hubUrl(d.hub_id), "_blank");
+      else setFocus(d.hub_id);
+    };
+  </script>
+  <script id="18" type="module">
+    if (!treeData) display(html`<p><i>Nothing to draw.</i>`);
+    else if (!treeData.children.length) display(html`<p><i>No family members in the selected groups.</i>`);
+    else if (layout === "Indented tree") {
+      // FrbrVis-style: hierarchy in the first column, metadata in the rest. Groups toggle
+      // locally (no re-render); Expressions start collapsed unless the user entered through one.
+      const dot = (color) => html`<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle"></span>`;
+      const rootAuthor = authorOf(climb.root.marc_key);
+      const cell = (v, style = "") => html`<td style="padding:2px 10px;white-space:nowrap;${style}">${v}</td>`;
+      const head = html`<tr style="text-align:left;color:#666;border-bottom:1px solid #ddd">
+        ${["Family", "Relationship to root", "Tier", "Author", "Medium", "Links", ""].map((h) => html`<th style="padding:4px 10px;font-weight:600">${h}</th>`)}</tr>`;
+      const rootRow = html`<tr style="font-weight:bold">${cell(html`${dot("#222")}${climb.root.title}`)}${cell("— root (LRM Work)", "color:#666;font-weight:normal")}${cell("")}${cell(rootAuthor ?? "", "font-weight:normal")}${cell((climb.root.media ?? []).join(", "), "font-weight:normal")}${cell(family.length, "text-align:right;font-weight:normal")}${cell(html`<a href=${hubUrl(climb.rootId)} target="_blank">↗</a>`)}</tr>`;
+      const body = treeData.children.flatMap((g) => {
+        const open = !(g.name === "Expressions" && !g.children.some((d) => d.hub_id === climb.entered));
+        const kids = g.children.map((d) => {
+          const author = authorOf(d.marc_key);
+          const entered = d.hub_id === climb.entered;
+          const media = (d.media ?? []).filter((m) => m !== "Text").join(", ");
+          const rel = d.dir === "out" ? `root → ${d.rel_type} → this` : `this → ${d.rel_type} → root`;
+          const tr = html`<tr style="${entered ? "background:#fff6d6;font-weight:bold" : ""}" hidden=${!open}>
+            ${cell(html`<span style="padding-left:2.6em">${dot(TIER_COLOR[d.tier])}<a href="#" style="color:inherit;text-decoration:none;border-bottom:1px dotted #999" title="click to re-root · shift-click opens id.loc.gov" onclick=${(e) => { e.preventDefault(); onClick(e, d); }}>${d.title}</a>${entered ? " ◀ you started here" : ""}</span>`)}
+            ${cell(rel, "color:#555")}
+            ${cell(`${d.tier} · ${TIER_LABEL[d.tier]}`, "color:#555")}
+            ${cell(author ? (author !== rootAuthor ? html`<b>${author}</b>` : author) : "", "")}
+            ${cell(media, "")}
+            ${cell(d.degree, "text-align:right")}
+            ${cell(html`<a href=${d.url} target="_blank">↗</a>`)}</tr>`;
+          return tr;
+        });
+        const caret = html`<span style="display:inline-block;width:1.2em;cursor:pointer;user-select:none">${open ? "▾" : "▸"}</span>`;
+        const groupRow = html`<tr style="cursor:pointer;background:#f6f6f6" onclick=${() => { const show = kids[0]?.hidden ?? false; kids.forEach((k) => (k.hidden = !show)); caret.textContent = show ? "▾" : "▸"; }}>
+          ${cell(html`<span style="padding-left:1em;font-weight:600">${caret}${g.name} <span style="color:#888;font-weight:normal">(${g.children.length})</span></span>`)}
+          <td colspan="6" style="padding:2px 10px;color:#888">${g.name === "Expressions" ? "LRM Expressions — translations & arrangements of the Work" : g.name === "Derivative works" ? "related Works: adaptations, sequels, parodies, derivatives" : g.name === "Series & parts" ? "whole/part, series, continuation" : "untyped or generic relations"}</td></tr>`;
+        return [groupRow, ...kids];
+      });
+      display(html`<div style="overflow-x:auto"><table style="border-collapse:collapse;font:13px sans-serif;min-width:100%">${head}${rootRow}${body}</table></div>`);
+    }
+    else if (layout === "Tidy tree") {
+      const root = d3.hierarchy(treeData);
+      // Fixed column spacing; the SVG grows to fit and scrolls horizontally on narrow screens.
+      const left = 24, right = 440, dx = 16, dy = 200;
+      d3.tree().nodeSize([dx, dy])(root);
+      let x0 = Infinity, x1 = -Infinity;
+      root.each((d) => { if (d.x > x1) x1 = d.x; if (d.x < x0) x0 = d.x; });
+      const height = x1 - x0 + dx * 3;
+      const svgWidth = left + dy * root.height + right;
+      const svg = d3.create("svg")
+        .attr("width", svgWidth).attr("height", height)
+        .attr("viewBox", [-left, x0 - dx * 1.5, svgWidth, height])
+        .style("font", "12px sans-serif").style("display", "block");
+      svg.append("g").attr("fill", "none").attr("stroke", "#bbb").attr("stroke-width", 1.2)
+        .selectAll("path").data(root.links()).join("path")
+        .attr("d", d3.linkHorizontal().x((d) => d.y).y((d) => d.x))
+        .attr("stroke", (d) => d.target.data.tier ? TIER_COLOR[d.target.data.tier] : "#bbb")
+        .attr("stroke-opacity", 0.6);
+      const node = svg.append("g").selectAll("g").data(root.descendants()).join("g")
+        .attr("transform", (d) => `translate(${d.y},${d.x})`);
+      node.append("circle")
+        .attr("r", (d) => d.data.root ? 7 : d.data.hub_id ? 4.5 : 3)
+        .attr("fill", (d) => d.data.root ? "#222" : d.data.tier ? TIER_COLOR[d.data.tier] : "#fff")
+        .attr("stroke", (d) => d.data.hub_id === climb.entered && !d.data.root ? "#222" : d.data.hub_id ? "none" : "#666")
+        .attr("stroke-width", (d) => d.data.hub_id === climb.entered && !d.data.root ? 2.5 : 1);
+      node.filter((d) => d.data.hub_id && !d.data.root).style("cursor", "pointer").on("click", (e, d) => onClick(e, d.data))
+        .append("title").text((d) => tooltip(d.data));
+      node.append("text")
+        .attr("dy", (d) => d.data.root ? "-0.9em" : "0.32em")
+        .attr("x", (d) => d.data.root ? -6 : d.children ? -10 : 8)
+        .attr("text-anchor", (d) => d.data.root ? "start" : d.children ? "end" : "start")
+        .attr("font-weight", (d) => d.data.root || !d.data.hub_id || d.data.hub_id === climb.entered ? "bold" : "normal")
+        .text((d) => d.data.root ? d.data.name : d.data.hub_id ? label(d.data) : `${d.data.name} (${d.children.length})`)
+        .attr("fill", (d) => d.data.hub_id ? "currentColor" : "#555")
+        .style("cursor", (d) => d.data.hub_id && !d.data.root ? "pointer" : null)
+        .on("click", (e, d) => d.data.hub_id && !d.data.root && onClick(e, d.data));
+      display(html`<div style="overflow-x:auto;max-width:100%">${svg.node()}</div>`);
+    } else {
+      const leaves = treeData.children.flatMap((g) => g.children);
+      const nodes = [{id: treeData.hub_id, title: treeData.name, root: true, tier: 0}, ...leaves.map((d) => ({id: d.hub_id, ...d}))];
+      const links = leaves.map((d) => ({source: treeData.hub_id, target: d.hub_id, tier: d.tier}));
+      const height = Math.max(420, Math.min(900, 300 + nodes.length * 6));
+      const sim = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(links).id((d) => d.id).distance((d) => 60 + d.tier * 25))
+        .force("charge", d3.forceManyBody().strength(-120))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("collide", d3.forceCollide(14));
+      const svg = d3.create("svg").attr("width", width).attr("height", height).attr("viewBox", [0, 0, width, height]).style("font", "11px sans-serif");
+      const link = svg.append("g").attr("stroke-opacity", 0.5).selectAll("line").data(links).join("line").attr("stroke", (d) => TIER_COLOR[d.tier]).attr("stroke-width", (d) => d.tier <= 2 ? 2 : 1);
+      const node = svg.append("g").selectAll("g").data(nodes).join("g").style("cursor", (d) => d.root ? null : "pointer").on("click", (e, d) => !d.root && onClick(e, d));
+      node.append("circle").attr("r", (d) => d.root ? 9 : 5).attr("fill", (d) => d.root ? "#222" : TIER_COLOR[d.tier]);
+      node.append("title").text((d) => d.root ? d.title : tooltip(d));
+      node.append("text").attr("x", 8).attr("dy", "0.32em").text((d) => d.root ? d.title : label(d)).attr("font-weight", (d) => d.root ? "bold" : null);
+      sim.on("tick", () => {
+        link.attr("x1", (d) => d.source.x).attr("y1", (d) => d.source.y).attr("x2", (d) => d.target.x).attr("y2", (d) => d.target.y);
+        node.attr("transform", (d) => `translate(${d.x},${d.y})`);
+      });
+      invalidation.then(() => sim.stop());
+      display(svg.node());
+    }
+  </script>
+  <script id="19" type="text/markdown">
+    ## 4. The same family as a table
+
+    Flat, sortable version of the indented tree (click a column header). Links go to `id.loc.gov`.
+  </script>
+  <script id="20" type="module">
+    display(Inputs.table(family.filter((d) => shownGroups.includes(d.group)), {
+      columns: ["tier", "group", "rel_type", "dir", "title", "marc_key", "media", "sameAuthor", "degree", "url"],
+      header: {tier: "Tier", group: "Group", rel_type: "Relationship", dir: "Dir", title: "Title", marc_key: "Access point", media: "Media", sameAuthor: "Same author?", degree: "Links", url: "Hub"},
+      format: {
+        url: (u) => html`<a href=${u} target="_blank">↗</a>`,
+        media: (m) => (m ?? []).join(", "),
+        sameAuthor: (v) => v == null ? "?" : v ? "yes" : "no",
+        dir: (d) => d === "out" ? "root → this" : "this → root"
+      },
+      width: {title: 320, marc_key: 320},
+      rows: 30, layout: "auto"
+    }));
+  </script>
+  <script id="21" type="text/markdown">
+    ## Notes for extending this notebook
+
+    - `db` is a DuckDB-WASM client with tables `rels(source_id, target_id, rel_type)`,
+      `hubs(hub_id, title, marc_key, media[], agents[])` and `deg(id, n)`. Query it from any cell
+      with `` db.query(sql, params) `` or `` db.sql`…` ``.
+    - `family` is the flat list of one-hop neighbours of the current root, each with `tier`,
+      `group`, `dir`, `sameAuthor`, `url`; `climb` holds the root and the bottom-up path;
+      `setFocus(hub_id)` re-roots everything.
+    - Tier lists live in the cell after the loader and mirror `RelationshipInferrer.php` in the
+      plugin — change them there first.
+    - Ideas: colour by `degree`, add a second hop for tier-1/2 members, show `rel_type_freq.parquet`
+      as a rarity bar, or diff two families side by side.
+  </script>
+</notebook>

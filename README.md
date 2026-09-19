@@ -4,6 +4,8 @@
 
 A VuFind plugin that surfaces **surprising, non-obvious work relationships** using Library of Congress BIBFRAME Hubs. The plugin prioritizes creative transformations, cross-medium adaptations, and unexpected connections between works.
 
+> **What is a Hub?** The BIBFRAME equivalent of a MARC Title or Name/Title authority heading — an authorized access point (e.g. `Austen, Jane. Pride and prejudice`) given an HTTP URI so it can be linked to rather than string-matched. Hubs are lightweight collocation nodes, and they carry typed relationships to other Hubs, which is what this plugin traverses. See [Appendix A: More about Hubs](https://bibframe.org/docs/view/documentation-bf-primer/appendix-a-more-about-hubs.md) in the BIBFRAME Primer, and our own notes on the five [Hub-creation paths](docs/modern-marc-hub-discovery.md#hub-creation-paths-observed-taxonomy) observed in marc2bibframe2 output.
+
 <div align="center">
   <kbd>
     <img src="https://github.com/user-attachments/assets/70dd3232-3d52-480d-a01d-1d5aa19c83da" width="323" height="333" alt="related-works-example" />
@@ -232,6 +234,30 @@ The LC bulk dump is published periodically; refresh by re-running the import
 above and clearing the plugin's caches
 (`bibframehub_rel_frequencies.json`, `bibframehub_empty_rdf.json`,
 `bibframehub_uri_validation.json` in the VuFind `local/cache/` directory).
+
+## Experiments: Parquet on Hugging Face + Observable explorer
+
+Running Neo4j is the expensive part of this plugin. Two experiments in this
+repo test a serverless alternative for *exploration* (not yet for the
+plugin's runtime path):
+
+- **[`tools/hf-dataset/`](tools/hf-dataset/)** converts the LC bulk dump
+  straight to Parquet in about a minute (no Neo4j) and publishes it as
+  [jimfhahn/lc-bibframe-hubs](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs)
+  on Hugging Face (2.9M Hubs, 544K typed relations, ~325 MB). DuckDB can
+  query it over HTTP — `SELECT … FROM 'hf://datasets/jimfhahn/lc-bibframe-hubs/relations.parquet'`
+  — in about 2 s cold, no download.
+- **[`notebooks/`](notebooks/)** holds an
+  [Observable Notebooks 2.0](https://observablehq.github.io/notebook-kit/)
+  **Hub family explorer** that loads that Parquet into DuckDB-WASM in the
+  browser and renders any Hub's bibliographic family — bottom-up climb from
+  a translation to its Work, then a top-down indented tree coloured by the
+  same surprise tiers the plugin uses. Deep-linkable via `?hub=<uuid>`,
+  so the sidebar can point at it.
+
+The intended end state: the plugin keeps its fast RDF-first path for the
+sidebar, and links out to hosted notebooks for "explore this work's family"
+— static pages, no graph server. See the two READMEs for details.
 
 ## Design Principle
 
@@ -490,6 +516,8 @@ vufind-bf-hubs-plugin/
 │   ├── modern-marc-hub-discovery.md   ← Modern MARC field analysis + findings
 │   ├── neo4j-graph-topology.md        ← Cypher schema reference for the bulk graph
 │   └── related-work-heng-et-al.md     ← Methodology / related research notes
+├── tools/hf-dataset/                  ← LC TTL → Parquet converter + Hugging Face dataset card
+├── notebooks/                         ← Observable Notebooks 2.0: Hub family explorer (DuckDB-WASM)
 ├── docker-compose.yml                 ← Docker dev environment (vufind + db)
 ├── docker/                            ← Dockerfile, entrypoint, VuFind config overrides
 ├── data/                              ← Local bulk-dump landing zone (gitignored)
