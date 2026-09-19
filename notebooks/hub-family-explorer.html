@@ -21,14 +21,24 @@
     `parodyof`, …) is a related Work in the same family.
   </script>
   <script id="2" type="module" pinned>
-    // Load the two Parquet files into an in-browser DuckDB. ~97 MB on first load; the CDN
-    // serves them with CORS + range support so nothing needs to be proxied.
+    // Load the two Parquet files into an in-browser DuckDB (~97 MB on first load). We fetch the
+    // bytes ourselves and register them as in-memory files: DuckDB-WASM's own HTTP reader trips
+    // on the CDN redirect in some browsers/webviews ("No files found that match the pattern").
     const DATASET = "https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs/resolve/main/";
     const db = await DuckDBClient.of();
     const t0 = performance.now();
-    display(html`<p>Loading <code>relations.parquet</code> and <code>hubs_connected.parquet</code>…`);
-    await db.query(`CREATE TABLE rels AS SELECT source_id, target_id, rel_type FROM read_parquet('${DATASET}relations.parquet')`);
-    await db.query(`CREATE TABLE hubs AS SELECT hub_id, title, marc_key, media, agents FROM read_parquet('${DATASET}hubs_connected.parquet')`);
+    const status = display(html`<p>Loading <code>relations.parquet</code> and <code>hubs_connected.parquet</code>…`);
+    async function attach(name) {
+      const res = await fetch(DATASET + name);
+      if (!res.ok) throw new Error(`${name}: HTTP ${res.status} from ${res.url}`);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      const mb = (bytes.length / 1e6).toFixed(0); // buffer is transferred to the worker (detached) below
+      await db._db.registerFileBuffer(name, bytes);
+      status.append(html` <small>${name} ${mb} MB ✓</small>`);
+    }
+    await Promise.all([attach("relations.parquet"), attach("hubs_connected.parquet")]);
+    await db.query(`CREATE TABLE rels AS SELECT source_id, target_id, rel_type FROM read_parquet('relations.parquet')`);
+    await db.query(`CREATE TABLE hubs AS SELECT hub_id, title, marc_key, media, agents FROM read_parquet('hubs_connected.parquet')`);
     await db.query(`CREATE TABLE deg AS SELECT id, count(*) AS n FROM (SELECT source_id AS id FROM rels UNION ALL SELECT target_id FROM rels) GROUP BY id`);
     const counts = await db.queryRow(`SELECT (SELECT count(*) FROM hubs) AS hubs, (SELECT count(*) FROM rels) AS rels`);
     display(html`<p>Ready: ${counts.hubs.toLocaleString()} connected Hubs, ${counts.rels.toLocaleString()} relations, ${((performance.now() - t0) / 1000).toFixed(1)}s.`);
