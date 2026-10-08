@@ -63,6 +63,23 @@ values as Parquet so they can be queried with DuckDB, Polars, pandas or the
 > if LC makes them readable. The 19 classes here cover roughly 12 million
 > records.
 
+## Contents
+
+**12,226,727 records, 47.1 GB of Parquet** (54 files), converted 2026‑10‑08.
+
+| class | records | | class | records |
+|---|---:|---|---|---:|
+| A General works | 117,340 | | L Education | 400,688 |
+| B Philosophy, psychology, religion | 1,287,475 | | M Music | 722,727 |
+| C Auxiliary sciences of history | 184,235 | | N Fine arts | 628,142 |
+| D World history | 1,500,614 | | Q Science | 911,724 |
+| E History of the Americas | 200,142 | | R Medicine | 486,685 |
+| F History of the Americas (local) | 380,594 | | S Agriculture | 275,019 |
+| G Geography, anthropology | 829,701 | | U Military science | 136,717 |
+| H Social sciences | 2,205,841 | | V Naval science | 48,833 |
+| J Political science | 414,639 | | Z Bibliography, library science | 281,385 |
+| K Law | 1,214,226 | | *P, T, no_LCC* | *not yet available* |
+
 ## Columns
 
 | column | type | notes |
@@ -112,7 +129,7 @@ clustering and visualization.
 - Source: `https://id.loc.gov/download/embeddings/<CLASS>_embeddings_2025.jsonl.gz`
   (served from `lds-downloads.s3.amazonaws.com`; files last modified 2026‑09‑22).
 - Conversion: [`tools/lc-embeddings/lc_embeddings_to_parquet.py`](https://github.com/jimfhahn/vufind-bf-hubs-plugin/tree/main/tools/lc-embeddings),
-  run as a Hugging Face Job. Each class file is streamed through DuckDB
+  run as a Hugging Face Job (CPU Upgrade, 27 minutes end to end). Each class file is streamed through DuckDB
   (`read_json` → `CAST(embedding AS FLOAT[1024])` → Parquet, zstd, ~1 GB
   shards). Any record whose vector is not exactly 1024‑dimensional would fail
   the run; none did.
