@@ -122,9 +122,19 @@ clustering and visualization.
 ## Relation to other datasets
 
 [jimfhahn/lc-bibframe-hubs](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs)
-holds LC's BIBFRAME Hub (work-level) graph. The two do **not** join
-directly: `lccn` here identifies bibliographic records, while Hub LCCNs are
-name/title authority numbers.
+holds LC's BIBFRAME Hub (work-level) graph. Both use LCCNs, from the same
+numbering scheme, but an LCCN identifies a single *record*. A Hub carries the
+LCCN of the name/title **authority** record it was derived from (`n…`, `no…`,
+`nr…`); rows here carry the LCCN of a **bibliographic** record. So `lccn` is a
+key within each dataset, not a foreign key between them; an exact join on it
+matches nothing (checked against class D: 0 of 1.5M).
+
+The working link is `lc_001`. LC's BIBFRAME Work for a bibliographic record
+lives at `https://id.loc.gov/resources/works/{lc_001}`, and that Work points
+to Hubs through `bf:relation` when the record has a uniform title, a
+name/title access point or a series. In a 6‑record spot check, all 6 Works
+resolved and 1 linked to a Hub (a series Hub). Expect Hub links for a
+minority of records.
 
 ## License
 
