@@ -302,6 +302,12 @@ The intended end state: the plugin keeps its fast RDF-first path for the
 sidebar, and links out to hosted notebooks for "explore this work's family"
 — static pages, no graph server. See the two READMEs for details.
 
+A third, independent experiment, **[`tools/lc-embeddings/`](tools/lc-embeddings/)**,
+repackages LC's experimental Titan v2 embeddings of its bibliographic records
+(gzipped JSONL by LCC class) as Parquet in
+[jimfhahn/lc-bib-embeddings](https://huggingface.co/datasets/jimfhahn/lc-bib-embeddings),
+converted by a Hugging Face Job (`hf jobs uv run lc_embeddings_to_parquet.py`).
+
 ## Design Principle
 
 > Surface surprising, non-obvious Work connections.
