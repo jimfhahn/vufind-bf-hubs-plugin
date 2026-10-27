@@ -63,6 +63,14 @@ values as Parquet so they can be queried with DuckDB, Polars, pandas or the
 > if LC makes them readable. The 19 classes here cover roughly 12 million
 > records.
 
+> **Linked to BIBFRAME Hubs.** 493K of these records (442K at high
+> confidence, about 96% precise) are matched to LC BIBFRAME Hubs in
+> [`bib_to_hub`](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs#hubs-collocate-records-across-classification),
+> keyed on `lc_001`. Through the Hub graph, records shelved in different
+> classes become one hop apart: Sacks's case studies (R) and Nyman's
+> opera of them (M), Carson's *Silent spring* (Q) and Stucky's orchestral
+> piece (M). See [Relation to other datasets](#relation-to-other-datasets).
+
 ## Contents
 
 **12,226,727 records, 47.1 GB of Parquet** (54 files), converted 2026‑10‑08.
@@ -146,12 +154,27 @@ LCCN of the name/title **authority** record it was derived from (`n…`, `no…`
 key within each dataset, not a foreign key between them; an exact join on it
 matches nothing (checked against class D: 0 of 1.5M).
 
-The working link is `lc_001`. LC's BIBFRAME Work for a bibliographic record
-lives at `https://id.loc.gov/resources/works/{lc_001}`, and that Work points
-to Hubs through `bf:relation` when the record has a uniform title, a
-name/title access point or a series. In a 6‑record spot check, all 6 Works
-resolved and 1 linked to a Hub (a series Hub). Expect Hub links for a
-minority of records.
+The working link is `lc_001`, two ways:
+
+- **Offline: [`bib_to_hub`](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs#bib_to_hubparquet-details)**
+  in lc-bibframe-hubs maps 493K records here to Hubs by matching each
+  record's creator and title against the Hub's authorized access point
+  (and its variant titles, which catches translations). High-confidence
+  rows (442K) were about 96% correct in a 300-record hand check.
+  ```sql
+  SELECT e.title, e.embedding, b.hub_id
+  FROM 'hf://datasets/jimfhahn/lc-bib-embeddings/data/M/*.parquet' e
+  JOIN 'hf://datasets/jimfhahn/lc-bibframe-hubs/bib_to_hub.parquet' b USING (lc_001)
+  WHERE b.confidence = 'high';
+  ```
+- **Online: LC's BIBFRAME Work** for a record lives at
+  `https://id.loc.gov/resources/works/{lc_001}` and points to Hubs through
+  `bf:expressionOf` or `bf:relation` when the MARC has a uniform title,
+  a name/title access point or a series. In an 80-record spot check all
+  80 Works resolved and 18 linked a Hub (7 through `bf:expressionOf`).
+
+The two overlap only partly: most `bib_to_hub` matches are records whose
+Work links no Hub.
 
 ## License
 

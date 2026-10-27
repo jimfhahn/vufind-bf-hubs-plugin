@@ -21,6 +21,8 @@ configs:
     data_files: relations.parquet
   - config_name: rel_type_freq
     data_files: rel_type_freq.parquet
+  - config_name: bib_to_hub
+    data_files: bib_to_hub.parquet
 ---
 
 # Library of Congress BIBFRAME Hubs — Parquet edition
@@ -50,6 +52,53 @@ graph database**: the whole thing is ~325 MB of Parquet that DuckDB
 (CLI, Python, or WASM in a browser) can query directly over HTTP
 range requests.
 
+## Hubs collocate records across classification
+
+`bib_to_hub.parquet` links **493K Library of Congress bibliographic
+records** to the Hubs here (442K at high confidence, about 96% precise
+in a 300-record hand check). It shows what Hubs add to a catalog:
+classification puts a record on one shelf, while a Hub and its typed
+relationships pull together the novel, the opera, the score and the
+case study wherever each one is classed.
+
+| Record shelved in… | Hub relationship | …is now one hop from |
+|---|---|---|
+| Sacks, *The man who mistook his wife for a hat* — 6 records in **R** (medicine) | opera adaptation | Nyman's chamber opera — 2 records in **M** (music) |
+| Carson, *Silent spring* — 5 records in **Q** (science) | derivative | Stucky's orchestral *Silent spring* — **M** |
+| Landon, *Anna and the King of Siam* — 4 records in **D** (history) | musical theatre adaptation | Rodgers, *The King and I* — 7 records in **M** |
+| Cellini, *Vita* — 4 records in **N** (art) | opera adaptation | Berlioz, *Benvenuto Cellini* — 4 records in **M** |
+| Goya, *Caprichos* — 7 records in **N** | based on | Gadenstätter, *Szenen nach Goya* — **M** |
+
+No call number, subject heading or shelf browse connects these pairs;
+the Hub graph does, and `bib_to_hub` ties both ends to real records
+(`https://id.loc.gov/resources/works/{lc_001}`). Across the mapping,
+317K Hubs gather records, 75K of them gather two or more (up to 176 on
+one Hub), and 492 creative relationships (adaptation, libretto, based
+on…) have records on both ends.
+
+The records come from LC's experimental bibliographic embeddings,
+repackaged as [jimfhahn/lc-bib-embeddings](https://huggingface.co/datasets/jimfhahn/lc-bib-embeddings)
+(12.2M records); `lc_001` joins the two. That source has **no class P
+(language and literature)** or T yet (LC's files are not downloadable),
+and P is where most adaptations start, so these cross-class counts are
+a floor. Method, precision and caveats are
+in [`bib_to_hub.parquet` details](#bib_to_hubparquet-details) below.
+
+```sql
+-- every LC record on Sacks's Hub and on the Hubs one relation away
+WITH me AS (SELECT 'a9402977-4b49-89c3-e703-6f4e0c969790' AS id),  -- Sacks, Man who mistook his wife for a hat
+fam AS (
+  SELECT id AS hub_id, 'this Hub' AS rel FROM me
+  UNION
+  SELECT CASE WHEN r.source_id = me.id THEN r.target_id ELSE r.source_id END, r.rel_type
+  FROM 'hf://datasets/jimfhahn/lc-bibframe-hubs/relations.parquet' r, me
+  WHERE me.id IN (r.source_id, r.target_id))
+SELECT fam.rel, b.lcc_class, b.title, b.creator, b.lc_001
+FROM fam JOIN 'hf://datasets/jimfhahn/lc-bibframe-hubs/bib_to_hub.parquet' b USING (hub_id)
+WHERE b.confidence = 'high'
+ORDER BY b.lcc_class;
+```
+
 ## Files
 
 | File | Rows | Size | One row per |
@@ -58,6 +107,8 @@ range requests.
 | `hubs_connected.parquet` | 917,826 | 75 MB | Hub that appears in at least one relation — the browsable graph |
 | `relations.parquet` | 544,005 | 22 MB | Hub → Hub relation, sorted by `(source_id, target_id)` |
 | `rel_type_freq.parquet` | 146 | tiny | relationship type, with count |
+| `bib_to_hub.parquet` | 493,331 | 35 MB | LC bibliographic record matched to a Hub (see [details](#bib_to_hubparquet-details)) |
+| `bib_to_hub_eval.csv` | 300 | 90 KB | hand-checked sample behind the precision figures |
 
 ### `hubs*.parquet` columns
 
@@ -84,6 +135,67 @@ range requests.
 Relations are recorded **only on the source side** in the LC data. To
 get a Hub's full neighborhood you must look in both directions
 (`source_id = X OR target_id = X`).
+
+### `bib_to_hub.parquet` details
+
+One row per LC bibliographic record that matched a Hub, out of the
+12.2M in [lc-bib-embeddings](https://huggingface.co/datasets/jimfhahn/lc-bib-embeddings).
+
+| column | type | notes |
+|---|---|---|
+| `lc_001` | string | MARC 001 of the LC record; its BIBFRAME Work is `https://id.loc.gov/resources/works/{lc_001}`; joins to `lc-bib-embeddings` |
+| `lccn`, `lcc_class`, `title`, `creator` | string | copied from the record so the table is readable on its own |
+| `hub_id` | string | best-matching Hub |
+| `match_method` | string | `aap`, `variant_title` or `uniform_title_130` (below) |
+| `confidence` | string | `high`, `medium` or `low` (below) |
+| `name_dominated` | bool | variant-title match where the record title is mostly the creator's name |
+| `hub_qualified` | bool | the Hub's access point carries `$l`/`$k`/`$n`/`$p`… (an expression, part or selection) |
+| `n_candidates`, `candidates` | int, list | all equally ranked Hubs, most-connected first; `hub_id` is `candidates[1]` |
+
+**How records were matched.** Offline, on the authorized access point.
+The record's first creator (dates and fuller forms dropped) and title
+(subtitle and leading article dropped) are normalized and compared with
+each Hub's `marc_key`:
+
+1. `aap`: creator + title = Hub `$a` + `$t`.
+2. `variant_title`: creator + title = Hub `$a` + one of its
+   `variant_titles`. This catches translations: *Studies on the
+   development of consciousness* → Chesni, *Recherches sur le
+   développement de la conscience*.
+3. `uniform_title_130`: title only, against `130` Hubs, for records
+   with no creator and at least two title words.
+
+Records keep the best tier; among ties, unqualified Hubs win, then the
+most-connected one.
+
+**Precision** (300 records, stratified; each checked against the LC
+Work's own Hub links where it has any, otherwise by hand):
+
+| confidence | records | exactly the right Hub | right work |
+|---|---|---|---|
+| `high`: one candidate, tiers 1–2 | 442,617 | **96%** (95% CI 92–98%) | 98.5% |
+| `medium`: several Hubs tie | 30,515 | 66% (52–78%) | 78% |
+| `low`: `130` title-only, or name-dominated | 20,199 | 66% (52–78%) | 72% |
+
+Use `high` as-is. Treat `medium` as "right work, Hub uncertain": the
+tied Hubs usually differ only by a qualifier (a dated vs. undated law,
+volume (Yoma) vs. (Ḥagigah)), so show `candidates`. Use `low` for
+exploration. Every judgment is in `bib_to_hub_eval.csv`.
+
+**What it complements.** LC's BIBFRAME Work for a record links Hubs
+only when the MARC has a uniform title (240/130) or series; in an
+80-record spot check, 7 Works had a `bf:expressionOf` Hub link. Most
+correct matches here are records whose Work links no Hub at all. Where
+LC does link one, it is often the language-expression Hub (*Carmen.
+Italian & French*) while `bib_to_hub` gives the base work, or the same
+Hub.
+
+**Limits.** 3.6% of records match at high confidence (12% in M,
+1.5–5% elsewhere): a Hub exists only where LC made a name/title
+authority, and translated titles match only through variant titles.
+Built from the 2026-05-05 Hubs dump and the 2025 embeddings release
+with [`build_bib_to_hub.py`](https://github.com/jimfhahn/vufind-bf-hubs-plugin/tree/main/tools/bib-hub-mapping)
+(about 2 minutes; reads only the text columns of the embeddings).
 
 ### Top relationship types
 
