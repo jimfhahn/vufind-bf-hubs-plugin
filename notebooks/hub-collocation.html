@@ -1,0 +1,322 @@
+<!doctype html>
+<notebook theme="air">
+  <title>BIBFRAME Hubs collocate records across classification</title>
+  <script id="1" type="text/markdown">
+    # Hubs collocate records across classification
+
+    A library shelves each book once, by subject. Oliver Sacks's case studies *The man who mistook
+    his wife for a hat* sit in **R** (medicine); Michael Nyman's chamber opera of the same name sits
+    in **M** (music). No call number, subject heading or shelf browse puts them side by side.
+
+    Library of Congress **BIBFRAME Hubs** can. A Hub is the authorized heading for a work
+    (*Sacks, Oliver. Man who mistook his wife for a hat*) with a URI, and Hubs carry typed
+    relationships to each other: *opera adaptation of*, *based on*, *libretto for*. Once
+    bibliographic records are attached to their Hubs, those relationships connect records on
+    different shelves.
+
+    This page shows that, using **437,836 LC bibliographic records matched to their Hub at high
+    confidence** (about 96% exactly right in a hand check). The match is the `bib_to_hub` table in
+    [jimfhahn/lc-bibframe-hubs](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs#hubs-collocate-records-across-classification);
+    the records come from LC's experimental embeddings release
+    ([jimfhahn/lc-bib-embeddings](https://huggingface.co/datasets/jimfhahn/lc-bib-embeddings), 12.2M
+    records). Everything runs in your browser. To browse any Hub's whole family, use the
+    [Hub family explorer](https://jimfhahn-bibframe-hub-explorer.static.hf.space/).
+
+    One gap to keep in mind: the source has **no class P (language and literature) and no T
+    (technology)** yet, because LC's files for them are not downloadable. P is where most
+    adaptations start, so every count here is a floor.
+  </script>
+  <script id="2" type="module">
+    // The Space is shown inside an iframe on huggingface.co, so external links open in a new tab.
+    for (const a of document.querySelectorAll('a[href^="http"]')) { a.target = "_blank"; a.rel = "noopener"; }
+    // Notebook Kit caps <figure> at 640px; Plot wraps titled charts in one, so let charts use the page width.
+    document.head.append(Object.assign(document.createElement("style"), {textContent: "main figure { max-width: none; }"}));
+  </script>
+  <script id="3" type="module" pinned>
+    // Four small Parquet files (~0.5 MB) written by tools/bib-hub-mapping/build_bib_to_hub.py
+    // --collocation. Same loader as the Hub family explorer: a same-origin copy in ./data/
+    // first (deploy-space.sh puts it there), then the dataset repo.
+    const DATASET = "https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs/resolve/main/collocation/";
+    const SOURCES = [new URL("./data/", location.href).href, DATASET];
+    const db = await DuckDBClient.of();
+    const isParquet = (b) => b.length > 8 && b[0] === 0x50 && b[1] === 0x41 && b[2] === 0x52 && b[3] === 0x31; // "PAR1"
+    async function attach(name) {
+      const errors = [];
+      for (const base of SOURCES) {
+        try {
+          const res = await fetch(base + name);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const bytes = new Uint8Array(await res.arrayBuffer());
+          if (!isParquet(bytes)) throw new Error("not a Parquet file");
+          return db._db.registerFileBuffer(name, bytes);
+        } catch (e) {
+          errors.push(`${base}${name}: ${e.message}`);
+        }
+      }
+      throw new Error(`Could not load ${name}:\n${errors.join("\n")}`);
+    }
+    const FILES = {hub_class: "colloc_hub_class.parquet", edges: "colloc_edges.parquet",
+                   records: "colloc_records.parquet", coverage: "colloc_coverage.parquet"};
+    await Promise.all(Object.values(FILES).map(attach));
+    for (const [table, file] of Object.entries(FILES)) {
+      await db.query(`CREATE TABLE ${table} AS SELECT * FROM read_parquet('${file}')`);
+    }
+  </script>
+  <script id="4" type="module">
+    const LCC = {
+      A: "General works", B: "Philosophy, psychology, religion", C: "Auxiliary sciences of history",
+      D: "World history", E: "History of the Americas", F: "History of the Americas (local)",
+      G: "Geography, anthropology, recreation", H: "Social sciences", J: "Political science", K: "Law",
+      L: "Education", M: "Music", N: "Fine arts", P: "Language and literature", Q: "Science",
+      R: "Medicine", S: "Agriculture", T: "Technology", U: "Military science", V: "Naval science",
+      Z: "Bibliography, library science"
+    };
+    const LCC_ORDER = Object.keys(LCC);
+    const MISSING = new Set(["P", "T"]);
+    const REL = {
+      basedon: "based on", librettofor: "libretto for", libretto: "libretto", derivative: "derivative",
+      variationsbasedon: "variations on", inspiredby: "inspired by", inspirationfor: "inspiration for",
+      operaadaptationof: "opera adaptation of", adaptationof: "adaptation of", adaptedas: "adapted as",
+      musicaltheatreadaptationof: "musical adaptation of", musicaltheatreadaptionof: "musical adaptation of",
+      adaptedasmusicaltheatre: "adapted as a musical", commentaryon: "commentary on", sequelto: "sequel to",
+      sequel: "sequel", musicalsettingof: "musical setting of", settomusicas: "set to music as",
+      parodyof: "parody of", incidentalmusicfor: "incidental music for", oratorioadaptationof: "oratorio adaptation of",
+      librettobasedon: "libretto based on"
+    };
+    const relLabel = (slug) => REL[slug] ?? slug;
+    const EXPLORER = "https://jimfhahn-bibframe-hub-explorer.static.hf.space/?hub=";
+    const workUrl = (id) => `https://id.loc.gov/resources/works/${id}`;
+    const shortHub = (h) => h.hub_name ? `${h.hub_name.split(",")[0]}, ${h.hub_title}` : h.hub_title;
+    const trunc = (s, n = 58) => s.length > n ? s.slice(0, n - 1) + "…" : s;
+    const rows = (t) => t.toArray().map((r) => r.toJSON());
+    // Collective uniform titles gather different books by one author (Works. Selections, Essays…).
+    const COLLECTIVE = /\b(Works|Selections|Essays|Speeches|Correspondence|Letters|Poems|Sermons|Writings|Prose works)\b/;
+  </script>
+  <script id="5" type="module">
+    // One entry per Hub with records: label parts, total records, class string ("AM"), per-class counts.
+    const hubs = new Map(rows(await db.query(
+      `SELECT hub_id, any_value(label) AS label, any_value(hub_name) AS hub_name, any_value(hub_title) AS hub_title,
+              any_value(hub_total)::INT AS total, string_agg(lcc_class, '' ORDER BY lcc_class) AS cls
+       FROM hub_class GROUP BY hub_id`)).map((d) => [d.hub_id, d]));
+    const hubClasses = d3.group(rows(await db.query(`SELECT hub_id, lcc_class, n::INT AS n FROM hub_class`)), (d) => d.hub_id);
+    // One entry per pair of Hubs joined by a creative relationship, whichever side LC recorded it on.
+    const pairs = rows(await db.query(
+      `SELECT least(source_id, target_id) AS a, greatest(source_id, target_id) AS b,
+              min(rel_type) AS rel, arg_min(source_id, rel_type) AS src
+       FROM edges GROUP BY 1, 2`))
+      .map((p) => {
+        const from = hubs.get(p.src), to = hubs.get(p.src === p.a ? p.b : p.a);
+        return {...p, from, to, relText: relLabel(p.rel), total: from.total + to.total, cross: from.cls !== to.cls};
+      })
+      .sort((x, y) => y.total - x.total);
+    const crossPairs = pairs.filter((p) => p.cross);
+  </script>
+  <script id="6" type="text/markdown">
+    ## 1. One work, two shelves
+
+    Pick a pair of works joined by a creative relationship. Each side lists the LC records matched
+    to that work's Hub, grouped by the class they are shelved in. Titles link to LC's BIBFRAME
+    description of the record; the work names open the Hub in the family explorer.
+  </script>
+  <script id="7" type="module" pinned>
+    const SACKS = "a9402977-4b49-89c3-e703-6f4e0c969790";
+    const pair = view(Inputs.select(crossPairs, {
+      label: "Pair",
+      value: crossPairs.find((p) => p.a === SACKS || p.b === SACKS),
+      format: (p) => `${trunc(shortHub(p.from), 45)}  →  ${p.relText}  →  ${trunc(shortHub(p.to), 45)}`
+    }));
+  </script>
+  <script id="8" type="module">
+    const recs = rows(await db.query(
+      `SELECT lc_001, hub_id, lcc_class, title, creator FROM records WHERE hub_id IN (?, ?) ORDER BY lcc_class, title`,
+      [pair.a, pair.b]));
+    const side = (h) => {
+      const mine = recs.filter((r) => r.hub_id === h.hub_id);
+      return html`<div style="flex:1 1 280px;min-width:0">
+        <div style="font-weight:700;font-size:1.05em;margin-bottom:.3rem"><a href=${EXPLORER + h.hub_id} target="_blank">${shortHub(h)}</a></div>
+        ${d3.groups(mine, (r) => r.lcc_class).map(([c, rs]) => html`
+          <div style="margin:.5rem 0">
+            <span style="font-weight:700;font-size:1.3em">${c}</span> <span style="color:#666">${LCC[c]}</span>
+            <ul style="margin:.2rem 0 0 1rem;padding:0;font-size:.9em">${rs.map((r) => html`
+              <li><a href=${workUrl(r.lc_001)} target="_blank">${r.title}</a>${r.creator ? html` <small style="color:#666">${r.creator}</small>` : ""}</li>`)}
+            </ul>
+          </div>`)}
+      </div>`;
+    };
+    display(html`<div style="display:flex;flex-wrap:wrap;gap:1rem 1.5rem;align-items:flex-start;max-width:960px">
+      ${side(pair.from)}
+      <div style="flex:0 0 8rem;text-align:center;padding-top:1rem;color:#b2182b"><div style="font-size:2em;line-height:1">→</div><b>${pair.relText}</b></div>
+      ${side(pair.to)}
+    </div>`);
+  </script>
+  <script id="9" type="text/markdown">
+    ## 2. Every creative link that crosses shelves
+
+    Each row is a pair of works joined by a creative relationship (adaptation, libretto, musical
+    setting, based on…) where both works have matched LC records and the records sit in different
+    classes. Dots show where each work's records are shelved; the grey line is the distance the Hub
+    relationship bridges. Columns P and T are empty because the source has no records there; the
+    novels and plays that do appear sit in **A** because LC classes collected sets such as *Great
+    Books of the Western World* (`AC1 .G72`) and some translation series there.
+  </script>
+  <script id="10" type="module">
+    const ys = new Map();
+    const pairLabel = (p) => {
+      const base = `${trunc(shortHub(p.from), 30)} → ${trunc(shortHub(p.to), 30)}`;
+      if (!ys.has(base)) return ys.set(base, p), base;
+      return ys.get(base) === p ? base : `${base} (${p.a.slice(0, 4)})`;
+    };
+    const pairPts = crossPairs.flatMap((p) => {
+      const y = pairLabel(p);
+      return [["first work", p.from], ["second work", p.to]].flatMap(([end, h]) =>
+        hubClasses.get(h.hub_id).map((c) => ({y, end, cls: c.lcc_class, n: c.n, work: shortHub(h), rel: p.relText})));
+    });
+    const spans = d3.rollups(pairPts, (v) => {
+      const idx = v.map((d) => LCC_ORDER.indexOf(d.cls));
+      return {x1: LCC_ORDER[d3.min(idx)], x2: LCC_ORDER[d3.max(idx)]};
+    }, (d) => d.y).map(([y, s]) => ({y, ...s}));
+    const dot = (end, dx, fill) => Plot.dot(pairPts.filter((d) => d.end === end), {
+      x: "cls", y: "y", r: "n", dx, fill, fillOpacity: 0.85, stroke: "white",
+      tip: {channels: {Work: "work", Relationship: "rel", Class: (d) => `${d.cls} · ${LCC[d.cls]}`, Records: "n"}}
+    });
+    display(Plot.plot({
+      title: "Creative relationships that connect records on different shelves",
+      subtitle: `${crossPairs.length} pairs of works; dot area = high-confidence LC records in that class (blue: first work, red: second)`,
+      marginLeft: 400, marginTop: 40, height: 24 * spans.length + 70, width: Math.max(width, 820),
+      x: {type: "point", domain: LCC_ORDER, axis: "top", label: null, grid: true, padding: 0.4},
+      y: {domain: d3.groupSort(pairPts, (v) => -d3.sum(v, (d) => d.n), (d) => d.y), label: null},
+      r: {range: [3, 11]},
+      marks: [
+        Plot.ruleY(spans, {y: "y", x1: "x1", x2: "x2", stroke: "#bbb", strokeWidth: 3}),
+        dot("first work", -4, "#4269d0"),
+        dot("second work", 4, "#e15759")
+      ]
+    }));
+  </script>
+  <script id="11" type="module">
+    display(Inputs.table(crossPairs.map((p) => ({
+      first: shortHub(p.from), first_classes: p.from.cls, relationship: p.relText,
+      second: shortHub(p.to), second_classes: p.to.cls, records: p.total, explore: p.from.hub_id
+    })), {
+      header: {first: "First work", first_classes: "Shelved in", relationship: "Relationship",
+               second: "Second work", second_classes: "Shelved in", records: "Records", explore: ""},
+      format: {explore: (id) => html`<a href=${EXPLORER + id} target="_blank">family ↗</a>`},
+      width: {first: 280, second: 280}, rows: 12, layout: "auto"
+    }));
+  </script>
+  <script id="12" type="text/markdown">
+    ## 3. One work, many shelves
+
+    Collocation also happens on a single Hub: one work whose editions LC classed under different
+    subjects. The U.S. Constitution sits in general works, American history, political science and
+    law; Machiavelli's *Prince*, Franklin's *Autobiography* and Hobbes's *Leviathan* each span three
+    classes. Collective titles (*Works. Selections*, *Essays*) gather different books by one author
+    rather than one work, so they are hidden by default.
+  </script>
+  <script id="13" type="module" pinned>
+    const hideCollective = view(Inputs.toggle({label: "Hide collective titles", value: true}));
+  </script>
+  <script id="14" type="module" pinned>
+    const topN = view(Inputs.range([10, 60], {label: "Works shown", step: 5, value: 25}));
+  </script>
+  <script id="15" type="module">
+    const multi = [...hubs.values()]
+      .filter((h) => h.cls.length >= 2 && !(hideCollective && COLLECTIVE.test(h.label)))
+      .sort((x, y) => y.cls.length - x.cls.length || y.total - x.total)
+      .slice(0, topN)
+      .map((h, i, all) => ({...h, y: all.findIndex((o) => shortHub(o) === shortHub(h)) === i ? trunc(shortHub(h), 60) : `${trunc(shortHub(h), 54)} (${h.hub_id.slice(0, 4)})`}));
+    const multiPts = multi.flatMap((h) => hubClasses.get(h.hub_id).map((c) => ({y: h.y, cls: c.lcc_class, n: c.n, total: h.total, label: h.label})));
+    display(Plot.plot({
+      title: "Works whose records LC shelved in the most classes",
+      subtitle: "Top works by number of distinct LC classes; dot area = high-confidence records in that class; number = records across all classes",
+      marginLeft: 340, marginRight: 50, marginTop: 40, height: 22 * multi.length + 70, width: Math.max(width, 820),
+      x: {type: "point", domain: LCC_ORDER, axis: "top", label: null, grid: true, padding: 0.4},
+      y: {domain: multi.map((h) => h.y), label: null},
+      r: {range: [2, 13]},
+      marks: [
+        Plot.dot(multiPts, {x: "cls", y: "y", r: "n", fill: "#4269d0", fillOpacity: 0.8, stroke: "white",
+          tip: {channels: {Work: "label", Class: (d) => `${d.cls} · ${LCC[d.cls]}`, Records: "n", "All records": "total"}}}),
+        Plot.text(multi, {y: "y", text: "total", frameAnchor: "right", dx: 36, fill: "currentColor"})
+      ]
+    }));
+  </script>
+  <script id="16" type="module">
+    display(Inputs.table(multi.map((h) => ({work: h.label, classes: h.cls, records: h.total, explore: h.hub_id})), {
+      header: {work: "Work (Hub heading)", classes: "Shelved in", records: "Records", explore: ""},
+      format: {explore: (id) => html`<a href=${EXPLORER + id} target="_blank">family ↗</a>`},
+      width: {work: 520}, rows: 10, layout: "auto"
+    }));
+  </script>
+  <script id="17" type="text/markdown">
+    ## 4. How much of the catalogue this reaches
+
+    Share of each class's records matched to a Hub. Music leads because composers' works are
+    almost always under uniform titles; most other classes sit at 2–5%. A record can only be
+    matched where LC made a name/title authority for its work.
+  </script>
+  <script id="18" type="module">
+    const cov = rows(await db.query(`SELECT lcc_class, records::INT AS records, high::INT AS high, medium::INT AS medium, low::INT AS low FROM coverage`));
+    const byClass = new Map(cov.map((d) => [d.lcc_class, d]));
+    const covPts = cov.flatMap((d) => ["high", "medium", "low"].map((k) => ({cls: d.lcc_class, confidence: k, pct: 100 * d[k] / d.records, n: d[k], records: d.records})));
+    const yLabel = (c) => `${c} · ${LCC[c]}`;
+    display(Plot.plot({
+      title: "LC records matched to a Hub, by class",
+      subtitle: "P and T: not in the source data yet",
+      marginLeft: 260, height: 22 * LCC_ORDER.length + 60, width: Math.min(Math.max(width, 640), 900),
+      x: {label: "% of the class's records", grid: true},
+      y: {domain: LCC_ORDER.map(yLabel), label: null},
+      color: {domain: ["high", "medium", "low"], range: ["#4269d0", "#97bbf5", "#d9d9d9"], legend: true},
+      marks: [
+        Plot.barX(covPts, {x: "pct", y: (d) => yLabel(d.cls), fill: "confidence",
+          tip: {channels: {Matched: "n", "Class records": "records"}, format: {pct: (v) => v.toFixed(1) + "%"}}}),
+        Plot.text(LCC_ORDER.filter((c) => MISSING.has(c)), {y: yLabel, x: 0, text: () => "not in source", textAnchor: "start", dx: 4, fill: "#999"}),
+        Plot.text(cov, {y: (d) => yLabel(d.lcc_class), x: (d) => 100 * (d.high + d.medium + d.low) / d.records,
+          text: (d) => `${(100 * d.high / d.records).toFixed(1)}%`, textAnchor: "start", dx: 4}),
+        Plot.ruleX([0])
+      ]
+    }));
+  </script>
+  <script id="19" type="text/markdown">
+    ## 5. How far to trust it
+
+    Records were matched offline: each record's first creator and title (normalized, subtitle
+    dropped) against each Hub's authorized access point, then against the Hub's variant titles,
+    which catches translations (*Studies on the development of consciousness* → Chesni,
+    *Recherches sur le développement de la conscience*). A stratified sample of 300 matches was
+    checked against LC's own BIBFRAME Work links and, where LC links none, by hand.
+
+    | confidence | records | exactly the right Hub | right work |
+    |---|---|---|---|
+    | high (used on this page) | 437,836 | **96.5%** (95% CI 93–98%) | 99% |
+    | medium: several Hubs tie | 30,425 | 66% | 78% |
+    | low: title-only or name-only matches | 25,070 | 66% | 72% |
+
+    Two error patterns are labelled down rather than counted: titles that are just the creator's
+    name (exhibition catalogues called *Picasso* gathered on one `Picasso, Pablo. Picasso` Hub),
+    and series whose volumes share a main title (*Chicken soup for the soul : …*), which show up
+    as one Hub spread over many classes with a different subtitle on almost every record. Method,
+    columns and every hand-checked row are on the
+    [dataset card](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs#bib_to_hubparquet-details).
+  </script>
+  <script id="20" type="text/markdown">
+    ---
+
+    ## About
+
+    **Data.** Library of Congress BIBFRAME Hubs bulk dump (2026-05-05) and LC's experimental
+    bibliographic embeddings (2025), both in the public domain, repackaged as Parquet:
+    [lc-bibframe-hubs](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs) (including
+    `bib_to_hub` and the four small `collocation/` files this page loads) and
+    [lc-bib-embeddings](https://huggingface.co/datasets/jimfhahn/lc-bib-embeddings).
+    "Creative relationship" means the surprise tiers 1–3 used by the companion VuFind plugin:
+    transformations and parodies, cross-medium adaptations, sequels and *based on*.
+
+    **Code.** [`tools/bib-hub-mapping/`](https://github.com/jimfhahn/vufind-bf-hubs-plugin/tree/main/tools/bib-hub-mapping)
+    builds the match and these files; this page is
+    [`notebooks/hub-collocation.html`](https://github.com/jimfhahn/vufind-bf-hubs-plugin/tree/main/notebooks)
+    ([Observable Notebook Kit](https://observablehq.github.io/notebook-kit/)). Tables loaded in
+    the browser: `hub_class(hub_id, label, hub_name, hub_title, lcc_class, n, hub_total, hub_classes)`,
+    `edges(source_id, target_id, rel_type)`, `records(lc_001, hub_id, lcc_class, title, creator)`,
+    `coverage(lcc_class, records, high, medium, low)`.
+  </script>
+</notebook>

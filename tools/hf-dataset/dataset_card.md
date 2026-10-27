@@ -54,9 +54,12 @@ range requests.
 
 ## Hubs collocate records across classification
 
+**See it: [Hubs collocate records across classification](https://huggingface.co/spaces/jimfhahn/bibframe-hub-collocation)**,
+an in-browser page built on the table below.
+
 `bib_to_hub.parquet` links **493K Library of Congress bibliographic
-records** to the Hubs here (442K at high confidence, about 96% precise
-in a 300-record hand check). It shows what Hubs add to a catalog:
+records** to the Hubs here (437,836 at high confidence, 96.5% exactly
+right in a 300-record hand check). It shows what Hubs add to a catalog:
 classification puts a record on one shelf, while a Hub and its typed
 relationships pull together the novel, the opera, the score and the
 case study wherever each one is classed.
@@ -64,17 +67,18 @@ case study wherever each one is classed.
 | Record shelved in… | Hub relationship | …is now one hop from |
 |---|---|---|
 | Sacks, *The man who mistook his wife for a hat* — 6 records in **R** (medicine) | opera adaptation | Nyman's chamber opera — 2 records in **M** (music) |
-| Carson, *Silent spring* — 5 records in **Q** (science) | derivative | Stucky's orchestral *Silent spring* — **M** |
+| Chernow, *Alexander Hamilton* — **E** (American history) | inspiration for | Miranda, *Hamilton* — 2 records in **M** |
 | Landon, *Anna and the King of Siam* — 4 records in **D** (history) | musical theatre adaptation | Rodgers, *The King and I* — 7 records in **M** |
 | Cellini, *Vita* — 4 records in **N** (art) | opera adaptation | Berlioz, *Benvenuto Cellini* — 4 records in **M** |
-| Goya, *Caprichos* — 7 records in **N** | based on | Gadenstätter, *Szenen nach Goya* — **M** |
+| Herriman, *Krazy Kat* — 2 records in **N** | based on | Carpenter's *Krazy Kat* ballet — **M** |
 
 No call number, subject heading or shelf browse connects these pairs;
 the Hub graph does, and `bib_to_hub` ties both ends to real records
-(`https://id.loc.gov/resources/works/{lc_001}`). Across the mapping,
-317K Hubs gather records, 75K of them gather two or more (up to 176 on
-one Hub), and 492 creative relationships (adaptation, libretto, based
-on…) have records on both ends.
+(`https://id.loc.gov/resources/works/{lc_001}`). At high confidence,
+304K Hubs gather records, 69K of them gather two or more (up to 176 on
+one Hub), 2,303 gather records from two or more LC classes, and 298
+creative relationships (adaptation, libretto, musical setting, based
+on…) have records on both ends, 40 of them across classes.
 
 The records come from LC's experimental bibliographic embeddings,
 repackaged as [jimfhahn/lc-bib-embeddings](https://huggingface.co/datasets/jimfhahn/lc-bib-embeddings)
@@ -109,6 +113,7 @@ ORDER BY b.lcc_class;
 | `rel_type_freq.parquet` | 146 | tiny | relationship type, with count |
 | `bib_to_hub.parquet` | 493,331 | 35 MB | LC bibliographic record matched to a Hub (see [details](#bib_to_hubparquet-details)) |
 | `bib_to_hub_eval.csv` | 300 | 90 KB | hand-checked sample behind the precision figures |
+| `collocation/colloc_*.parquet` | 4 files | 0.5 MB | small summaries (high confidence) behind the [collocation page](https://huggingface.co/spaces/jimfhahn/bibframe-hub-collocation): records per Hub per class, creative Hub pairs, the records themselves, coverage by class |
 
 ### `hubs*.parquet` columns
 
@@ -148,7 +153,8 @@ One row per LC bibliographic record that matched a Hub, out of the
 | `hub_id` | string | best-matching Hub |
 | `match_method` | string | `aap`, `variant_title` or `uniform_title_130` (below) |
 | `confidence` | string | `high`, `medium` or `low` (below) |
-| `name_dominated` | bool | variant-title match where the record title is mostly the creator's name |
+| `name_dominated` | bool | the record title is just the creator's name ("Picasso" by Picasso), or, for variant titles, the name plus one word against a collective Hub |
+| `series_title` | bool | the Hub looks like a series title that collected different books (see below) |
 | `hub_qualified` | bool | the Hub's access point carries `$l`/`$k`/`$n`/`$p`… (an expression, part or selection) |
 | `n_candidates`, `candidates` | int, list | all equally ranked Hubs, most-connected first; `hub_id` is `candidates[1]` |
 
@@ -166,16 +172,31 @@ each Hub's `marc_key`:
    with no creator and at least two title words.
 
 Records keep the best tier; among ties, unqualified Hubs win, then the
-most-connected one.
+most-connected one. Two error patterns found while checking are
+labelled down rather than dropped:
+
+- **Name-only titles** → `low`. Exhibition catalogues called *Picasso*
+  or *Marc Chagall* all match a generic `Picasso, Pablo. Picasso` Hub;
+  only 5 of 40 checked were the Hub LC's own Work links.
+- **Series titles** → `medium`. Dropping the subtitle collapses
+  *Chicken soup for the soul : …* or *The worst-case scenario survival
+  handbook : …* volumes onto one Hub. Such Hubs show a pattern editions
+  of one work do not: a different subtitle on most records **and**
+  records in three or more LC classes. 13 Hubs (106 records); the
+  Constitution, the *Federalist* and *Leviathan* are not flagged.
 
 **Precision** (300 records, stratified; each checked against the LC
 Work's own Hub links where it has any, otherwise by hand):
 
 | confidence | records | exactly the right Hub | right work |
 |---|---|---|---|
-| `high`: one candidate, tiers 1–2 | 442,617 | **96%** (95% CI 92–98%) | 98.5% |
-| `medium`: several Hubs tie | 30,515 | 66% (52–78%) | 78% |
-| `low`: `130` title-only, or name-dominated | 20,199 | 66% (52–78%) | 72% |
+| `high`: one candidate, tiers 1–2 | 437,836 | **96.5%** (95% CI 93–98%) | 99% |
+| `medium`: several Hubs tie, or series title | 30,425 | 66% (52–78%) | 78% |
+| `low`: `130` title-only, or name-dominated | 25,070 | 66% (52–78%) | 72% |
+
+The `medium` and `low` samples were drawn before the two rules above;
+the 4,700 name-only matches that moved into `low` are weaker than that
+sample suggests (5 of 40 confirmed by LC's Work links).
 
 Use `high` as-is. Treat `medium` as "right work, Hub uncertain": the
 tied Hubs usually differ only by a qualifier (a dated vs. undated law,

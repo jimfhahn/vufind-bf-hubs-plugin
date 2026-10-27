@@ -310,11 +310,13 @@ converted by a Hugging Face Job (`hf jobs uv run lc_embeddings_to_parquet.py`).
 
 **[`tools/bib-hub-mapping/`](tools/bib-hub-mapping/)** joins the two: it
 matches 493K of those LC records to their Hub by authorized access point
-(442K at high confidence, about 96% precise in a 300-record hand check)
+(437,836 at high confidence, 96.5% exactly right in a 300-record hand check)
 and publishes the result as `bib_to_hub` in lc-bibframe-hubs. The point is
 collocation across classification: Sacks's case studies (class R) end up
-one Hub relation from Nyman's opera of them (M), Carson's *Silent spring*
-(Q) from Stucky's orchestral piece (M).
+one Hub relation from Nyman's opera of them (M), Chernow's *Alexander
+Hamilton* (E) from Miranda's *Hamilton* (M). A second notebook,
+[**Hubs collocate records across classification**](https://huggingface.co/spaces/jimfhahn/bibframe-hub-collocation)
+(`notebooks/hub-collocation.html`), charts those cross-shelf links.
 
 ## Design Principle
 
@@ -582,7 +584,7 @@ vufind-bf-hubs-plugin/
 ├── tools/hf-dataset/                  ← LC TTL → Parquet converter + Hugging Face dataset card
 ├── tools/lc-embeddings/               ← LC bibliographic embeddings → Parquet (HF Job)
 ├── tools/bib-hub-mapping/             ← LC records → Hubs crosswalk (bib_to_hub) + precision sample
-├── notebooks/                         ← Observable Notebooks 2.0: Hub family explorer (DuckDB-WASM)
+├── notebooks/                         ← Observable Notebooks 2.0: Hub family explorer + collocation page (DuckDB-WASM)
 ├── docker-compose.yml                 ← Docker dev environment (vufind + db)
 ├── docker/                            ← Dockerfile, entrypoint, VuFind config overrides
 ├── data/                              ← Local bulk-dump landing zone (gitignored)

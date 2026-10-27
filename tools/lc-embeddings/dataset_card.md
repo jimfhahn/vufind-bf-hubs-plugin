@@ -63,13 +63,16 @@ values as Parquet so they can be queried with DuckDB, Polars, pandas or the
 > if LC makes them readable. The 19 classes here cover roughly 12 million
 > records.
 
-> **Linked to BIBFRAME Hubs.** 493K of these records (442K at high
-> confidence, about 96% precise) are matched to LC BIBFRAME Hubs in
+> **Linked to BIBFRAME Hubs.** 493K of these records (437,836 at high
+> confidence, 96.5% exactly right in a hand check) are matched to LC
+> BIBFRAME Hubs in
 > [`bib_to_hub`](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs#hubs-collocate-records-across-classification),
 > keyed on `lc_001`. Through the Hub graph, records shelved in different
 > classes become one hop apart: Sacks's case studies (R) and Nyman's
-> opera of them (M), Carson's *Silent spring* (Q) and Stucky's orchestral
-> piece (M). See [Relation to other datasets](#relation-to-other-datasets).
+> opera of them (M), Chernow's *Alexander Hamilton* (E) and Miranda's
+> *Hamilton* (M). See them on the
+> [collocation page](https://huggingface.co/spaces/jimfhahn/bibframe-hub-collocation)
+> and in [Relation to other datasets](#relation-to-other-datasets).
 
 ## Contents
 
@@ -160,7 +163,7 @@ The working link is `lc_001`, two ways:
   in lc-bibframe-hubs maps 493K records here to Hubs by matching each
   record's creator and title against the Hub's authorized access point
   (and its variant titles, which catches translations). High-confidence
-  rows (442K) were about 96% correct in a 300-record hand check.
+  rows (437,836) were 96.5% exactly right in a 300-record hand check.
   ```sql
   SELECT e.title, e.embedding, b.hub_id
   FROM 'hf://datasets/jimfhahn/lc-bib-embeddings/data/M/*.parquet' e

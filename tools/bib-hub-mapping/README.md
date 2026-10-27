@@ -10,15 +10,18 @@ matched to the Hub for their work.
 record sits on one shelf; its Hub's typed relationships reach records on
 other shelves. With this table, Sacks's *The man who mistook his wife for
 a hat* (6 records, class R) is one hop from Nyman's opera of it (class M),
-Carson's *Silent spring* (Q) from Stucky's orchestral piece (M), and
+Chernow's *Alexander Hamilton* (E) from Miranda's *Hamilton* (M), and
 Landon's *Anna and the King of Siam* (D) from *The King and I* (M). No
-call number, subject heading or shelf browse connects those pairs.
+call number, subject heading or shelf browse connects those pairs. The
+[collocation page](https://huggingface.co/spaces/jimfhahn/bibframe-hub-collocation)
+(`notebooks/hub-collocation.html`) charts all of them.
 
 ## Run
 
 ```bash
 ../hf-dataset/.venv/bin/python build_bib_to_hub.py            # → out/bib_to_hub.parquet (~2 min)
 ../hf-dataset/.venv/bin/python build_bib_to_hub.py --stats    # + coverage and collocation numbers
+../hf-dataset/.venv/bin/python build_bib_to_hub.py --collocation out/collocation   # + notebook files
 ```
 
 Reads `hubs.parquet` and `relations.parquet` from `../hf-dataset/out/` if
@@ -27,13 +30,22 @@ present, otherwise from Hugging Face, and only the `lc_001`, `lccn`,
 47 GB of vectors). Needs `duckdb` (any recent version; the `hf-dataset`
 venv has it).
 
+`--collocation DIR` also writes four small files (~0.5 MB, high
+confidence only) for the notebook: `colloc_hub_class` (records per Hub
+per LC class, with Hub labels), `colloc_edges` (creative Hub→Hub links
+with records on both ends; "creative" = surprise tiers 1–3 of the
+plugin's `RelationshipInferrer.php`), `colloc_records` (those Hubs'
+records) and `colloc_coverage` (records and matches per class).
+
 Publish:
 
 ```bash
 HF=../hf-dataset/.venv/bin/hf
 $HF upload jimfhahn/lc-bibframe-hubs out/bib_to_hub.parquet bib_to_hub.parquet --repo-type dataset
+$HF upload jimfhahn/lc-bibframe-hubs out/collocation collocation --repo-type dataset
 $HF upload jimfhahn/lc-bibframe-hubs bib_to_hub_eval.csv bib_to_hub_eval.csv --repo-type dataset
 $HF upload jimfhahn/lc-bibframe-hubs ../hf-dataset/dataset_card.md README.md --repo-type dataset
+(cd ../../notebooks && ./deploy-space.sh collocation)   # refresh the Space's copy
 ```
 
 ## Method
@@ -48,13 +60,24 @@ dates and fuller forms of names dropped) and joined in three tiers:
 | 2 | `variant_title` | first creator + title | `$a` + any of `variant_titles` (translations) |
 | 3 | `uniform_title_130` | title, records with no creator, ≥ 2 words | `130` Hub `$a` |
 
-Each record keeps its best tier. Within it, variant matches whose title is
-mostly the creator's name ("Paulo Orosio", "Bach-Festival") rank below
-others, unqualified Hubs rank above qualified ones, and the most-connected
-Hub wins (ties by `hub_id`, so runs are reproducible).
+Each record keeps its best tier. Within it, name-dominated matches rank
+below others, unqualified Hubs rank above qualified ones, and the
+most-connected Hub wins (ties by `hub_id`, so runs are reproducible).
 
 `confidence`: `high` = tier 1–2 with one candidate; `medium` = several
-candidates; `low` = tier 3 or name-dominated.
+candidates, or a series-title Hub; `low` = tier 3 or name-dominated.
+
+- **Name-dominated** (`name_dominated`): after removing words that match
+  the creator's name (4-letter prefix), nothing is left ("Picasso" by
+  Picasso, "Paulo Orosio" by Orosius), or, for variant titles, one word is
+  left and the Hub is a collective title ("Bach-Festival" → *Works*).
+- **Series title** (`series_title`): a Hub whose high-confidence records
+  have a different subtitle on most records (≥ 4, ≥ half) **and** sit in
+  3+ LC classes. That is the signature of different books sharing a main
+  title (*Chicken soup for the soul : …*); editions of one work vary
+  their subtitles but stay in one or two classes, and classics that do
+  span classes (Constitution, *Federalist*, *Leviathan*) keep one
+  subtitle on most records. 13 Hubs, 106 records.
 
 ## Precision
 
@@ -62,13 +85,14 @@ candidates; `low` = tier 3 or name-dominated.
 against its LC BIBFRAME Work (`lc_work_check`: `CONFIRMED` same Hub,
 `SAME_AAP` same name/title Hub, `OTHER_HUB`, `NO_HUB`), and everything
 the Work could not settle was judged by hand (`verdict`: `correct`,
-`near` = right work but a different Hub of it, `wrong`).
+`near` = right work but a different Hub of it, `wrong`). The
+`confidence` column is the stratum the record was drawn from.
 
-| confidence | exactly the right Hub | right work |
-|---|---|---|
-| high | 96.0% (95% CI 92–98%) | 98.5% |
-| medium | 66% (52–78%) | 78% |
-| low | 66% (52–78%) | 72% |
+| confidence | records | exactly the right Hub | right work |
+|---|---|---|---|
+| high | 437,836 | 96.5% (95% CI 93–98%), 199 rows still high | 99% |
+| medium | 30,425 | 66% (52–78%) | 78% |
+| low | 25,070 | 66% (52–78%) | 72% |
 
 Things learned on the way, kept as rules:
 
@@ -76,13 +100,20 @@ Things learned on the way, kept as rules:
   matches, most of them correct (*Silent night*, *Kama sutra*); it only
   helps in tier 3, where one-word titles were right 2 times in 12, so
   tier 3 requires two words.
-- Name-dominated variant titles (mostly exhibition catalogues titled with
-  the artist's name) were right about half the time against LC's Works,
-  so they are labelled `low`, not dropped.
+- Name-only titles were checked separately against LC's Works: variant
+  tier about half right, access-point tier 5 of 40 confirmed (most are
+  different catalogues gathered on one `Artist. Artist` Hub). Both are
+  labelled `low`, not dropped. This rule moved one sampled high row (a
+  de Chirico catalogue, judged wrong) to low.
+- Subtitle spread alone is not a usable error signal: 414 Hubs have ≥ 5
+  mostly distinct subtitles, and nearly all are law editions, Talmud
+  commentary volumes and scores. Only combined with class spread does it
+  isolate series titles.
 - Back-links from Hubs to Works are not an alternative: the whole Hubs
   dump holds 56 `resources/works|instances` URIs (stray 670 citations).
 
-The eval was drawn from the session build that preceded this script,
-which broke ties among equally connected candidates arbitrarily; for
+The eval was drawn from an earlier build that broke ties among equally
+connected candidates arbitrarily and had neither label-down rule; for
 `medium` rows the `hub_id` judged in the CSV can differ from the one in
-the published table. `high` rows are identical.
+the published table, and the `low` figure predates the name-only
+access-point rows that now sit there.

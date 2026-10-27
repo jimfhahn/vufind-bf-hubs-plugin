@@ -34,6 +34,28 @@ navigation of bibliographic families; Pauman Budanović & Žumer (2021,
 Merčun, Žumer & Aalberg's FrbrVis (*JASIST* 2017, *J. Doc.* 2016): indented
 tree and sunburst best of four hierarchical layouts.
 
+## `hub-collocation.html`
+
+**Hubs collocate records across classification**, deployed as the Space
+[jimfhahn/bibframe-hub-collocation](https://huggingface.co/spaces/jimfhahn/bibframe-hub-collocation).
+Where the explorer is a tool for one Hub, this page makes one argument
+across the whole catalogue: LC bibliographic records matched to their Hub
+(`bib_to_hub`, see [`tools/bib-hub-mapping/`](../tools/bib-hub-mapping/))
+end up one Hub relationship away from records on other shelves.
+
+1. **One work, two shelves**: pick a pair of works (Sacks → Nyman's opera,
+   Chernow → *Hamilton*…) and see both sides' LC records grouped by class.
+2. **Every creative link that crosses shelves**: one row per pair, dots at
+   each LC class holding records, a line for the span the Hub bridges.
+3. **One work, many shelves**: single Hubs whose editions LC classed under
+   several subjects (Constitution, *Prince*, *Leviathan*).
+4. **Coverage by class** and 5. **how far to trust the match**.
+
+It loads four small files (~0.5 MB, `collocation/colloc_*.parquet` in the
+dataset, written by `build_bib_to_hub.py --collocation`), so it opens
+instantly. Work names deep-link into the explorer (`?hub=`), record titles
+into `id.loc.gov/resources/works/{lc_001}`.
+
 ## Running locally
 
 ```bash
@@ -54,10 +76,12 @@ node_modules/.bin/notebooks build --root . -- *.html
 ```
 
 The output is plain HTML/JS and can be hosted anywhere static (GitHub
-Pages, a Hugging Face Space with the `static` SDK, …). `./deploy-space.sh`
-builds, adds a same-origin copy of the two Parquet files under `data/` (the
-dataset's CDN redirect has unreliable CORS headers in Firefox; the page falls
-back to the dataset URL when `data/` is absent), and uploads to the Space.
+Pages, a Hugging Face Space with the `static` SDK, …). `./deploy-space.sh
+[explorer|collocation]` builds that one notebook, adds a same-origin copy of
+the Parquet files it needs under `data/` (the dataset's CDN redirect has
+unreliable CORS headers in Firefox; the page falls back to the dataset URL
+when `data/` is absent), adds the Space card from `space/` or
+`space-collocation/`, and uploads to the Space.
 
 ## Editing
 
