@@ -1,4 +1,4 @@
-# Notebooks — Observable Notebooks 2.0 experiments
+# Notebooks: Observable Notebooks 2.0 experiments
 
 Serverless exploration of the LC BIBFRAME Hubs graph, reading Parquet
 straight from the Hugging Face dataset
@@ -11,11 +11,11 @@ repo; the plan is for the plugin sidebar to deep-link into these pages.
 Bibliographic-family view of any Hub:
 
 1. **Search** by title / access point (ranked by connectivity).
-2. **Bottom-up climb** — follows outgoing `translationof` / `arrangementof`
+2. **Bottom-up climb**: follows outgoing `translationof` / `arrangementof`
    to the family root (the LRM *Work*). Entering through a translation is
    supported and the entry point is marked.
 3. **Top-down layout** of the one-hop family, grouped into *Derivative
-   works* (surprise tiers 1–3, coloured), *Expressions* (collapsed by
+   works* (surprise tiers 1–3, colored), *Expressions* (collapsed by
    default), *Series & parts*, *Other related*. Two layouts:
    **indented tree** (default) and tidy tree.
 4. **Flat table** of the same rows with `id.loc.gov` links.
@@ -28,11 +28,11 @@ are copied verbatim from
 `hub-family-explorer?hub=013dc21c-e732-e589-24fe-bcc876264d3a`
 (*Pride and prejudice*). The URL is kept in sync as you re-root.
 
-Design draws on Arastoopoor (2022, *LHT* 40:1) — top-down vs. bottom-up
+Design draws on Arastoopoor (2022, *LHT* 40:1): top-down vs. bottom-up
 navigation of bibliographic families; Pauman Budanović & Žumer (2021,
-*CCQ* 59:7) — LRM family as the organizing unit; Merčun, Žumer & Aalberg's
-FrbrVis (*JASIST* 2017, *J. Doc.* 2016) — indented tree best of four
-hierarchical layouts.
+*CCQ* 59:7): an LRM-based interface built on entities and relationships;
+Merčun, Žumer & Aalberg's FrbrVis (*JASIST* 2017, *J. Doc.* 2016): indented
+tree and sunburst best of four hierarchical layouts.
 
 ## Running locally
 
@@ -54,12 +54,15 @@ node_modules/.bin/notebooks build --root . -- *.html
 ```
 
 The output is plain HTML/JS and can be hosted anywhere static (GitHub
-Pages, a Hugging Face Space with the `static` SDK, …).
+Pages, a Hugging Face Space with the `static` SDK, …). `./deploy-space.sh`
+builds, adds a same-origin copy of the two Parquet files under `data/` (the
+dataset's CDN redirect has unreliable CORS headers in Firefox; the page falls
+back to the dataset URL when `data/` is absent), and uploads to the Space.
 
 ## Editing
 
 Notebooks are single HTML files (`<notebook>` root, one `<script>` per
-cell, four-space indented) — edit in any text editor, or open in
+cell, four-space indented). Edit in any text editor, or open in
 [Observable Desktop](https://observablehq.github.io/notebook-kit/desktop)
 / the new Observable web editor, whose AI agent can extend them. The
 explorer exposes stable handles for that: `db` (DuckDB client with

@@ -17,14 +17,15 @@ page that loads the
 Parquet files into DuckDB-WASM and renders any Library of Congress BIBFRAME
 Hub's *bibliographic family*: climb from a translation up to its Work, then see
 adaptations, sequels, parodies, translations and series laid out as an indented
-tree (or tidy tree), coloured by how surprising the relationship is.
+tree (or tidy tree), colored by how surprising the relationship is.
 
-**Deep link:** `?hub=<uuid>` — e.g.
+**Deep link:** `?hub=<uuid>`, e.g.
 [`?hub=013dc21c-e732-e589-24fe-bcc876264d3a`](./?hub=013dc21c-e732-e589-24fe-bcc876264d3a)
 for *Pride and prejudice*.
 
-No server: the first load pulls ~97 MB of Parquet from the dataset repo; after
-that everything runs locally in your browser.
+No server: the first load pulls ~97 MB of Parquet (a copy of the two dataset
+files is served from this Space, so no cross-origin requests); after that
+everything runs locally in your browser.
 
 Source and the companion VuFind plugin:
 <https://github.com/jimfhahn/vufind-bf-hubs-plugin> (`notebooks/`).

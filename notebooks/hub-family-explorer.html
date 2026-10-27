@@ -4,47 +4,69 @@
   <script id="1" type="text/markdown">
     # BIBFRAME Hub family explorer
 
-    Browse Library of Congress **BIBFRAME Hubs** as *bibliographic families*, straight from
-    Parquet on Hugging Face — no graph database, no server. Everything runs in your browser
-    with DuckDB-WASM against [jimfhahn/lc-bibframe-hubs](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs)
-    (2.9M Hubs, 544K typed relations, LC bulk dump 2026-05-05).
+    See how a book, film, opera or translation is connected to the other works in its
+    **bibliographic family**: adaptations, sequels, parodies, translations, series.
 
-    Pick *any* Hub — even a translation — and the notebook climbs to the family root, then lays the
-    family out top-down with the [VuFind plugin's](https://github.com/jimfhahn/vufind-bf-hubs-plugin)
-    surprise tiers deciding what is foregrounded. Why it is built this way is in
+    The data is the Library of Congress **BIBFRAME Hubs** (a *Hub* is an authorized name/title
+    heading with a URI, e.g. *Austen, Jane. Pride and prejudice*). About 918K Hubs are linked to at
+    least one other Hub by 544K typed relations; that connected part of the graph is what you
+    browse here. It loads from [Parquet on Hugging Face](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs)
+    and runs entirely in your browser, with no server.
+
+    **How to use it:** search for a title, pick a Hub, and the page (1) climbs from that Hub up to
+    the original work, then (2) shows everything related to that work, most surprising first.
+    Click any title to make it the new center. Background and sources are in
     [Design notes](#design-notes) at the end.
-
-    A *Hub* is the BIBFRAME equivalent of a MARC name/title authority heading given a URI
-    ([primer](https://bibframe.org/docs/view/documentation-bf-primer/appendix-a-more-about-hubs.md)).
-    In LRM terms the family root is the *Work*; Hubs that point at it with `translationof` /
-    `arrangementof` are its *Expressions*; everything else (`adaptedasmotionpicture`, `sequel`,
-    `parodyof`, …) is a related Work in the same family.
+  </script>
+  <script id="23" type="module">
+    // The Space is shown inside an iframe on huggingface.co and github.com refuses to be framed,
+    // so every external link in the prose must open in a new tab.
+    for (const a of document.querySelectorAll('a[href^="http"]')) { a.target = "_blank"; a.rel = "noopener"; }
   </script>
   <script id="2" type="module" pinned>
     // Load the two Parquet files into an in-browser DuckDB (~97 MB on first load). We fetch the
     // bytes ourselves and register them as in-memory files: DuckDB-WASM's own HTTP reader trips
     // on the CDN redirect in some browsers/webviews ("No files found that match the pattern").
+    // Sources, in order: a same-origin copy (deploy-space.sh puts one in ./data/), then the
+    // dataset repo. Both end up on the Xet CDN, which intermittently serves a cached
+    // Access-Control-Allow-Origin for a different origin (Firefox: "does not match"); two
+    // independent CDN objects give the loader a second chance.
     const DATASET = "https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs/resolve/main/";
+    const SOURCES = [new URL("./data/", location.href).href, DATASET];
     const db = await DuckDBClient.of();
     const t0 = performance.now();
-    const status = display(html`<p>Loading <code>relations.parquet</code> and <code>hubs_connected.parquet</code>…`);
+    const status = display(html`<p>Loading the graph (~97 MB, once)…`);
+    const isParquet = (b) => b.length > 8 && b[0] === 0x50 && b[1] === 0x41 && b[2] === 0x52 && b[3] === 0x31; // "PAR1"
+    async function fetchParquet(name) {
+      const errors = [];
+      for (const base of SOURCES) {
+        try {
+          const res = await fetch(base + name);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const bytes = new Uint8Array(await res.arrayBuffer());
+          if (!isParquet(bytes)) throw new Error("not a Parquet file"); // e.g. dev-server HTML fallback
+          return {bytes, base};
+        } catch (e) {
+          errors.push(`${base}${name}: ${e.message}`);
+        }
+      }
+      throw new Error(`Could not load ${name}:\n${errors.join("\n")}`);
+    }
     async function attach(name) {
-      const res = await fetch(DATASET + name);
-      if (!res.ok) throw new Error(`${name}: HTTP ${res.status} from ${res.url}`);
-      const bytes = new Uint8Array(await res.arrayBuffer());
+      const {bytes, base} = await fetchParquet(name);
       const mb = (bytes.length / 1e6).toFixed(0); // buffer is transferred to the worker (detached) below
       await db._db.registerFileBuffer(name, bytes);
-      status.append(html` <small>${name} ${mb} MB ✓</small>`);
+      status.append(html` <small>${name} ${mb} MB ✓${base === DATASET ? " (dataset)" : ""}</small>`);
     }
     await Promise.all([attach("relations.parquet"), attach("hubs_connected.parquet")]);
     await db.query(`CREATE TABLE rels AS SELECT source_id, target_id, rel_type FROM read_parquet('relations.parquet')`);
     await db.query(`CREATE TABLE hubs AS SELECT hub_id, title, marc_key, media, agents FROM read_parquet('hubs_connected.parquet')`);
     await db.query(`CREATE TABLE deg AS SELECT id, count(*) AS n FROM (SELECT source_id AS id FROM rels UNION ALL SELECT target_id FROM rels) GROUP BY id`);
     const counts = await db.queryRow(`SELECT (SELECT count(*) FROM hubs) AS hubs, (SELECT count(*) FROM rels) AS rels`);
-    display(html`<p>Ready: ${counts.hubs.toLocaleString()} connected Hubs, ${counts.rels.toLocaleString()} relations, ${((performance.now() - t0) / 1000).toFixed(1)}s.`);
+    display(html`<p>Ready: ${counts.hubs.toLocaleString()} connected Hubs, ${counts.rels.toLocaleString()} relations (${((performance.now() - t0) / 1000).toFixed(1)}s).`);
   </script>
   <script id="3" type="module">
-    // Surprise tiers — copied verbatim from RelationshipInferrer.php so the notebook and the
+    // Surprise tiers, copied verbatim from RelationshipInferrer.php so the notebook and the
     // VuFind plugin agree on what counts as a surprising relationship.
     const TIERS = {
       1: ["inspirationfor", "inspiredby", "parodyof", "imitationof", "derivative", "graphicnovelizationof",
@@ -71,7 +93,7 @@
     };
     const TIER_OF = new Map(Object.entries(TIERS).flatMap(([t, slugs]) => slugs.map((s) => [s, +t])));
     const tierOf = (slug) => TIER_OF.get(slug) ?? 5;
-    const TIER_LABEL = {1: "Creative transformation", 2: "Cross-medium adaptation", 3: "Continuation / adaptation", 4: "Serial / structural", 5: "Predictable"};
+    const TIER_LABEL = {1: "Creative transformation", 2: "Cross-medium adaptation", 3: "Sequel / adaptation", 4: "Series / structural", 5: "Predictable"};
     const TIER_COLOR = {1: "#b2182b", 2: "#ef8a62", 3: "#d9a300", 4: "#67a9cf", 5: "#999999"};
     const EXPRESSION_EDGES = new Set(["translationof", "arrangementof"]);
     const SERIES_EDGES = new Set(["inseries", "containedin", "containerof", "contains", "subseriesof", "seriescontainerof", "issuedas"]);
@@ -91,9 +113,9 @@
   <script id="4" type="text/markdown">
     ## 1. Find a Hub
 
-    Search by title or authorized access point. Candidates are ranked by how many relations
-    they participate in, so the family root usually comes first — but pick a translation
-    (e.g. *Pride and prejudice. Turkish*) to see the bottom-up climb.
+    Type a title or author. Results with the most connections come first, so the original work is
+    usually at the top. Try picking a translation (e.g. *Pride and prejudice. Turkish*) to see the
+    climb in step 2.
   </script>
   <script id="5" type="module" pinned>
     // Deep link: ?hub=<uuid> opens straight on that Hub (used by the VuFind plugin sidebar).
@@ -128,10 +150,11 @@
     setFocus(chosen?.hub_id ?? hubParam ?? null);
   </script>
   <script id="10" type="text/markdown">
-    ## 2. Climb to the family root (bottom-up)
+    ## 2. Climb to the original work
 
-    Follow outgoing `translationof` / `arrangementof` edges until a Hub has none. That Hub is
-    treated as the LRM **Work** and becomes the root of the tree below.
+    If the Hub you picked is a translation or arrangement, follow its `translationof` /
+    `arrangementof` links upward until there is nothing above. That Hub is the **family root**
+    (the *Work*, in IFLA-LRM terms) and everything below is drawn around it.
   </script>
   <script id="11" type="module">
     const climb = await (async () => {
@@ -153,9 +176,9 @@
     })();
   </script>
   <script id="12" type="module">
-    if (!climb) display(html`<p><i>No Hub selected.</i>`);
-    else if (climb.path.length === 0) display(html`<p>You are at the family root: <b>${climb.root.title}</b> <small>(${climb.root.marc_key ?? ""})</small> · <a href=${hubUrl(climb.rootId)} target="_blank">id.loc.gov</a>`);
-    else display(html`<p>You entered via <b>${chosen?.title ?? climb.entered}</b>; climbed ${climb.path.map((p) => html`<code>${p.rel}</code> → <b>${p.toTitle}</b>`)}. Family root: <a href=${hubUrl(climb.rootId)} target="_blank">${climb.root.title}</a> <small>(${climb.root.marc_key ?? ""})</small>`);
+    if (!climb) display(html`<p><i>No Hub selected. Search above.</i>`);
+    else if (climb.path.length === 0) display(html`<p><b>${climb.root.title}</b> <small>(${climb.root.marc_key ?? ""})</small> is already the family root, so there is nothing to climb. <a href=${hubUrl(climb.rootId)} target="_blank">View on id.loc.gov ↗</a>`);
+    else display(html`<p>Started at <b>${chosen?.title ?? climb.entered}</b>${climb.path.map((p) => html` → <small>${p.rel}</small> → <b>${p.toTitle}</b>`)}.<br>Family root: <a href=${hubUrl(climb.rootId)} target="_blank">${climb.root.title} ↗</a> <small>(${climb.root.marc_key ?? ""})</small>`);
   </script>
   <script id="13" type="module">
     // One row per family member: every Hub one hop from the root, in either direction,
@@ -189,16 +212,21 @@
     })();
   </script>
   <script id="14" type="text/markdown">
-    ## 3. The family, top-down
+    ## 3. The family
 
-    One branch per group. **Derivative works** are coloured by surprise tier and expanded by
-    default; **Expressions** (translations, arrangements) are the predictable part of the family
-    and start collapsed — unless you arrived through one, in which case it is shown and marked.
-    Click any title to re-root on it — families overlap, and following a film adaptation into
-    *its* family is where the interesting connections show up. Shift-click opens `id.loc.gov`.
+    Everything one step away from the root, in four groups:
 
-    Two layouts: the **indented tree** (FrbrVis's winner — hierarchy plus columns for
-    relationship, author, medium, connectivity) and a **tidy tree** (pure hierarchy).
+    - **Derivative works**: adaptations, sequels, parodies, films, operas. The interesting part;
+      open by default and colored by how surprising the relationship is (red = most surprising).
+    - **Expressions**: translations and arrangements. Predictable, so collapsed by default
+      (opened automatically if that is where you started).
+    - **Series & parts**: whole/part, series, continuations, revisions.
+    - **Other related**: links with no specific type.
+
+    **Click a title** to make it the new root. Families overlap, and following a film adaptation
+    into *its* family is where the unexpected connections show up. **Shift-click** opens the Hub
+    on `id.loc.gov`. Choose the **indented tree** (hierarchy plus columns) or a **tidy tree**
+    (hierarchy only).
   </script>
   <script id="15" type="module" pinned>
     const shown = view(Inputs.checkbox(["Derivative works", "Expressions", "Series & parts", "Other related"], {
@@ -210,9 +238,10 @@
     const groups = d3.groups(family, (d) => d.group);
     const groupOrder = ["Derivative works", "Expressions", "Series & parts", "Other related"];
     const legend = html`<div style="display:flex;gap:1em;flex-wrap:wrap;font:12px sans-serif;margin:0.5em 0">
-      ${[1, 2, 3, 4, 5].map((t) => html`<span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${TIER_COLOR[t]};margin-right:4px"></span>Tier ${t} — ${TIER_LABEL[t]}</span>`)}
-      <span>◐ different author &nbsp; ▣ different medium</span>
-      ${groupOrder.map((g) => { const n = groups.find(([k]) => k === g)?.[1].length ?? 0; return html`<span style="color:#666">${g}: ${n}</span>`; })}
+      <span style="color:#666">Surprise:</span>
+      ${[1, 2, 3, 4, 5].map((t) => html`<span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${TIER_COLOR[t]};margin-right:4px"></span>${TIER_LABEL[t]}</span>`)}
+      <span>◐ different author &nbsp; ▣ different medium (film, music…)</span>
+      <span style="color:#666">${family.length} family members: ${groupOrder.map((g) => `${g} ${groups.find(([k]) => k === g)?.[1].length ?? 0}`).join(" · ")}</span>
     </div>`;
     display(legend);
   </script>
@@ -235,11 +264,11 @@
       const author = authorOf(d.marc_key);
       const rootAuthor = authorOf(climb.root.marc_key);
       const t = d.title.length > 44 ? d.title.slice(0, 43) + "…" : d.title;
-      const by = author && author !== rootAuthor ? ` — ${author.length > 24 ? author.slice(0, 23) + "…" : author}` : "";
+      const by = author && author !== rootAuthor ? ` (${author.length > 24 ? author.slice(0, 23) + "…" : author})` : "";
       const here = d.hub_id === climb.entered ? "  ◀ you started here" : "";
       return `${t}${by}${mediaMark}${authorMark}${here}`;
     };
-    const tooltip = (d) => `${d.title}\n${d.marc_key ?? ""}\n${d.dir === "out" ? "root —" + d.rel_type + "→ this" : "this —" + d.rel_type + "→ root"}\nmedia: ${(d.media ?? []).join(", ") || "—"}\n${d.degree} links · tier ${d.tier}\n(click to re-root · shift-click opens id.loc.gov)`;
+    const tooltip = (d) => `${d.title}\n${d.marc_key ?? ""}\n${d.dir === "out" ? "root → " + d.rel_type + " → this" : "this → " + d.rel_type + " → root"}\nmedia: ${(d.media ?? []).join(", ") || "none"}\n${d.degree} links · tier ${d.tier}\n(click to re-root · shift-click opens id.loc.gov)`;
     const onClick = (event, d) => {
       if (event.shiftKey) window.open(hubUrl(d.hub_id), "_blank");
       else setFocus(d.hub_id);
@@ -256,7 +285,7 @@
       const cell = (v, style = "") => html`<td style="padding:2px 10px;white-space:nowrap;${style}">${v}</td>`;
       const head = html`<tr style="text-align:left;color:#666;border-bottom:1px solid #ddd">
         ${["Family", "Relationship to root", "Tier", "Author", "Medium", "Links", ""].map((h) => html`<th style="padding:4px 10px;font-weight:600">${h}</th>`)}</tr>`;
-      const rootRow = html`<tr style="font-weight:bold">${cell(html`${dot("#222")}${climb.root.title}`)}${cell("— root (LRM Work)", "color:#666;font-weight:normal")}${cell("")}${cell(rootAuthor ?? "", "font-weight:normal")}${cell((climb.root.media ?? []).join(", "), "font-weight:normal")}${cell(family.length, "text-align:right;font-weight:normal")}${cell(html`<a href=${hubUrl(climb.rootId)} target="_blank">↗</a>`)}</tr>`;
+      const rootRow = html`<tr style="font-weight:bold">${cell(html`${dot("#222")}${climb.root.title}`)}${cell("root (LRM Work)", "color:#666;font-weight:normal")}${cell("")}${cell(rootAuthor ?? "", "font-weight:normal")}${cell((climb.root.media ?? []).join(", "), "font-weight:normal")}${cell(family.length, "text-align:right;font-weight:normal")}${cell(html`<a href=${hubUrl(climb.rootId)} target="_blank">↗</a>`)}</tr>`;
       const body = treeData.children.flatMap((g) => {
         const open = !(g.name === "Expressions" && !g.children.some((d) => d.hub_id === climb.entered));
         const kids = g.children.map((d) => {
@@ -277,7 +306,7 @@
         const caret = html`<span style="display:inline-block;width:1.2em;cursor:pointer;user-select:none">${open ? "▾" : "▸"}</span>`;
         const groupRow = html`<tr style="cursor:pointer;background:#f6f6f6" onclick=${() => { const show = kids[0]?.hidden ?? false; kids.forEach((k) => (k.hidden = !show)); caret.textContent = show ? "▾" : "▸"; }}>
           ${cell(html`<span style="padding-left:1em;font-weight:600">${caret}${g.name} <span style="color:#888;font-weight:normal">(${g.children.length})</span></span>`)}
-          <td colspan="6" style="padding:2px 10px;color:#888">${g.name === "Expressions" ? "LRM Expressions — translations & arrangements of the Work" : g.name === "Derivative works" ? "related Works: adaptations, sequels, parodies, derivatives" : g.name === "Series & parts" ? "whole/part, series, continuation" : "untyped or generic relations"}</td></tr>`;
+          <td colspan="6" style="padding:2px 10px;color:#888">${g.name === "Expressions" ? "LRM Expressions: translations and arrangements of the Work" : g.name === "Derivative works" ? "related Works: adaptations, sequels, parodies, derivatives" : g.name === "Series & parts" ? "whole/part, series, continuation, revision" : "generic links (related, relatedwork) and other tier-5 relations"}</td></tr>`;
         return [groupRow, ...kids];
       });
       display(html`<div style="overflow-x:auto"><table style="border-collapse:collapse;font:13px sans-serif;min-width:100%">${head}${rootRow}${body}</table></div>`);
@@ -324,7 +353,7 @@
   <script id="19" type="text/markdown">
     ## 4. The same family as a table
 
-    Flat, sortable version of the indented tree (click a column header). Links go to `id.loc.gov`.
+    Sortable version of the tree (click a column header). The ↗ links go to `id.loc.gov`.
   </script>
   <script id="20" type="module">
     display(Inputs.table(family.filter((d) => shownGroups.includes(d.group)), {
@@ -346,38 +375,46 @@
     - `db` is a DuckDB-WASM client with tables `rels(source_id, target_id, rel_type)`,
       `hubs(hub_id, title, marc_key, media[], agents[])` and `deg(id, n)`. Query it from any cell
       with `` db.query(sql, params) `` or `` db.sql`…` ``.
-    - `family` is the flat list of one-hop neighbours of the current root, each with `tier`,
-      `group`, `dir`, `sameAuthor`, `url`; `climb` holds the root and the bottom-up path;
-      `setFocus(hub_id)` re-roots everything.
-    - Tier lists live in the cell after the loader and mirror `RelationshipInferrer.php` in the
-      plugin — change them there first.
-    - Ideas: colour by `degree`, add a second hop for tier-1/2 members, show `rel_type_freq.parquet`
-      as a rarity bar, or diff two families side by side.
+    - `family` is the list of the root's one-hop neighbors, each with `tier`, `group`, `dir`,
+      `sameAuthor`, `url`; `climb` holds the root and the path up to it; `setFocus(hub_id)`
+      re-roots everything.
+    - The surprise tiers (cell after the loader) are copied from the VuFind plugin's
+      [`RelationshipInferrer.php`](https://github.com/jimfhahn/vufind-bf-hubs-plugin). Change
+      them there first.
+    - Ideas: color by `degree`, add a second hop for tier-1/2 members, show `rel_type_freq.parquet`
+      as a rarity bar, or compare two families side by side.
   </script>
   <script id="22" type="text/markdown">
     ---
 
     ## Design notes
 
-    **Bottom-up *and* top-down.** Arastoopoor (2022, *Library Hi Tech* 40:1) found that users with
-    no particular item in mind draw a **top-down** family — work → expressions, skipping
-    manifestations — while users with a specific need navigate **bottom-up**, from the translation
-    or format they want up to the work and across to its siblings. Hence the climb in step 2 and
-    the "you started here" marker.
+    **Why climb first, then fan out?** Arastoopoor (2022, *Library Hi Tech* 40:1) found that people
+    with no particular book in mind picture a family **top-down** (work → translations and
+    versions), but people looking for a specific edition or translation navigate **bottom-up**,
+    from that item to the work and across to its siblings. The page supports both: step 2 is the
+    climb, step 3 the fan-out, and "you started here" marks your entry point.
 
-    **The family as the unit.** Pauman Budanović & Žumer (2021, *CCQ* 59:7) make the bibliographic
-    family the organizing unit of an IFLA-LRM interface, with typed relationships as first-class
-    objects — which is why relationship type, not just the neighbouring title, is a column.
+    **Why show the relationship type?** Pauman Budanović & Žumer (2021, *CCQ* 59:7) built and tested
+    a cataloging interface on IFLA-LRM entities and the relationships between them, rather than on
+    flat records. Here the relationship (*sequel*, *parody of*, *film adaptation*) gets its own
+    column for the same reason: it is the most informative thing about a family member.
 
-    **Indented tree first.** Merčun, Žumer & Aalberg's **FrbrVis** studies (*JASIST* 2017;
-    *J. Doc.* 2016) compared indented tree, radial tree, circle-pack and sunburst layouts for FRBR
-    work families and found the **indented tree** the most successful — it reads like a table, so
-    metadata columns sit right beside the hierarchy. The tidy tree is kept for comparison; a
-    sunburst (their co-winner) is the obvious next layout for a second hop.
+    **Why an indented tree?** Merčun, Žumer & Aalberg's **FrbrVis** studies (*J. Doc.* 2016;
+    *JASIST* 2017) tested four ways of drawing work families: indented tree, radial tree,
+    circle-pack, and sunburst. The indented tree and the sunburst did best on both speed and user
+    preference. The indented tree also reads like a table, so extra columns fit naturally; the
+    tidy tree is there for comparison.
 
-    **Data.** [jimfhahn/lc-bibframe-hubs](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs)
-    on Hugging Face — the LC bulk dump converted to Parquet; see the dataset card for schema and
-    provenance. Source for this notebook and the companion VuFind plugin:
+    **Surprise tiers.** Colors follow the companion
+    [VuFind plugin](https://github.com/jimfhahn/vufind-bf-hubs-plugin): tier 1 creative
+    transformations (parody, inspiration), tier 2 cross-medium adaptations (film, opera), tier 3
+    continuations and other adaptations, tier 4 serial/structural links, tier 5 predictable ones
+    (translations, series membership).
+
+    **Data.** [jimfhahn/lc-bibframe-hubs](https://huggingface.co/datasets/jimfhahn/lc-bibframe-hubs),
+    the Library of Congress BIBFRAME Hubs bulk dump (2026-05-05) converted to Parquet; the dataset
+    card documents the schema. Source code for this page and the plugin:
     [jimfhahn/vufind-bf-hubs-plugin](https://github.com/jimfhahn/vufind-bf-hubs-plugin).
   </script>
 </notebook>
