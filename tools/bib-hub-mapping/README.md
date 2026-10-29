@@ -38,7 +38,8 @@ venv has it).
 
 `--collocation DIR` also writes four small files (~0.5 MB, high
 confidence only) for the notebook: `colloc_hub_class` (records per Hub
-per LC class, with Hub labels), `colloc_edges` (creative Hub→Hub links
+per LC class, with Hub labels and `hub_links`, the Hub's relation count;
+0 = no family in the explorer), `colloc_edges` (creative Hub→Hub links
 with records on both ends; "creative" = surprise tiers 1–3 of the
 plugin's `RelationshipInferrer.php`), `colloc_records` (those Hubs'
 records) and `colloc_coverage` (records and matches per class).

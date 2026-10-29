@@ -236,11 +236,14 @@ def collocation(con, rels, outdir):
                    trim(regexp_replace(regexp_extract(marc_key, CASE WHEN tag = '130' THEN '\$a(.*)$' ELSE '\$t(.*)$' END, 1),
                         '\s*\$[a-z]', ' ', 'g'), ' ,.;') AS hub_title
             FROM hk WHERE hub_id IN (SELECT hub_id FROM keep)""")
+    # hub_links = Hub-to-Hub relations of any type; 0 means the Hub is not in hubs_connected.parquet,
+    # so the family explorer has nothing to draw for it.
     con.execute(f"""COPY (
         SELECT c.hub_id, l.label, l.hub_name, l.hub_title, c.lcc_class, c.n,
                sum(c.n) OVER (PARTITION BY c.hub_id)::INTEGER AS hub_total,
-               count(*) OVER (PARTITION BY c.hub_id) AS hub_classes
-        FROM hubcls c JOIN hublabel l USING (hub_id) ORDER BY hub_id, lcc_class
+               count(*) OVER (PARTITION BY c.hub_id) AS hub_classes,
+               coalesce(d.n, 0)::INTEGER AS hub_links
+        FROM hubcls c JOIN hublabel l USING (hub_id) LEFT JOIN deg d ON d.id = c.hub_id ORDER BY hub_id, lcc_class
         ) TO '{out / "colloc_hub_class.parquet"}' (FORMAT parquet, COMPRESSION zstd)""")
     con.execute(f"COPY (SELECT * FROM edges ORDER BY 1, 2) TO '{out / 'colloc_edges.parquet'}' (FORMAT parquet, COMPRESSION zstd)")
     con.execute(f"""COPY (

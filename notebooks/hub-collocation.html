@@ -110,8 +110,13 @@
     // One entry per Hub with records: label parts, total records, class string ("AM"), per-class counts.
     const hubs = new Map(rows(await db.query(
       `SELECT hub_id, any_value(label) AS label, any_value(hub_name) AS hub_name, any_value(hub_title) AS hub_title,
-              any_value(hub_total)::INT AS total, string_agg(lcc_class, '' ORDER BY lcc_class) AS cls
+              any_value(hub_total)::INT AS total, string_agg(lcc_class, '' ORDER BY lcc_class) AS cls,
+              any_value(hub_links)::INT AS links
        FROM hub_class GROUP BY hub_id`)).map((d) => [d.hub_id, d]));
+    // Hubs with no links to other Hubs have no family to draw, so they open on id.loc.gov instead.
+    const familyLink = (id) => hubs.get(id)?.links
+      ? html`<a href=${EXPLORER + id} target="_blank">family ↗</a>`
+      : html`<a href=${`https://id.loc.gov/resources/hubs/${id}`} target="_blank" title="No links to other Hubs, so no family to explore" style="color:#888">id.loc.gov ↗</a>`;
     const hubClasses = d3.group(rows(await db.query(`SELECT hub_id, lcc_class, n::INT AS n FROM hub_class`)), (d) => d.hub_id);
     // One entry per pair of Hubs joined by a creative relationship, whichever side LC recorded it on.
     const pairs = rows(await db.query(
@@ -214,7 +219,7 @@
     })), {
       header: {first: "First work", first_classes: "Shelved in", relationship: "Relationship",
                second: "Second work", second_classes: "Shelved in", records: "Records", explore: ""},
-      format: {explore: (id) => html`<a href=${EXPLORER + id} target="_blank">family ↗</a>`},
+      format: {explore: familyLink},
       width: {first: 280, second: 280}, rows: 12, layout: "auto"
     }));
   </script>
@@ -232,7 +237,9 @@
     Hiawatha*). That link is one-way and attached to that record only. The Hub relationship joins
     every record on both sides. In the other 12 pairs no record names the other work, so the Hub
     is the only link between them, apart from four that share a main heading (*Cellini, Benvenuto* twice; *Operas*;
-    *Hymns, English*). Script:
+    *Hymns, English*). Most are 19th-century stage works: Scribe and Boieldieu's *La dame blanche* after
+    Scott's *Monastery* and *Abbot*, Gevaert's *Quentin Durward*, Bishop's *Heart of Mid-Lothian*,
+    Solomon's *Pickwick*, Lassen's *Faust* music. Script:
     [`tools/bib-hub-mapping/lcsh_overlap.py`](https://github.com/jimfhahn/vufind-bf-hubs-plugin/tree/main/tools/bib-hub-mapping).
   </script>
   <script id="12" type="text/markdown">
@@ -242,7 +249,9 @@
     subjects. The U.S. Constitution sits in general works, American history, political science and
     law; Machiavelli's *Prince*, Franklin's *Autobiography* and Hobbes's *Leviathan* each span three
     classes. Collective titles (*Works. Selections*, *Essays*) gather different books by one author
-    rather than one work, so they are hidden by default.
+    rather than one work, so they are hidden by default. Many of these Hubs (*Prince*,
+    *Autobiography*) have no links to other Hubs, so their table link goes to `id.loc.gov`
+    rather than the family explorer.
   </script>
   <script id="13" type="module" pinned>
     const hideCollective = view(Inputs.toggle({label: "Hide collective titles", value: true}));
@@ -274,7 +283,7 @@
   <script id="16" type="module">
     display(Inputs.table(multi.map((h) => ({work: h.label, classes: h.cls, records: h.total, explore: h.hub_id})), {
       header: {work: "Work (Hub heading)", classes: "Shelved in", records: "Records", explore: ""},
-      format: {explore: (id) => html`<a href=${EXPLORER + id} target="_blank">family ↗</a>`},
+      format: {explore: familyLink},
       width: {work: 520}, rows: 10, layout: "auto"
     }));
   </script>
@@ -346,7 +355,7 @@
     builds the match and these files; this page is
     [`notebooks/hub-collocation.html`](https://github.com/jimfhahn/vufind-bf-hubs-plugin/tree/main/notebooks)
     ([Observable Notebook Kit](https://observablehq.github.io/notebook-kit/)). Tables loaded in
-    the browser: `hub_class(hub_id, label, hub_name, hub_title, lcc_class, n, hub_total, hub_classes)`,
+    the browser: `hub_class(hub_id, label, hub_name, hub_title, lcc_class, n, hub_total, hub_classes, hub_links)`,
     `edges(source_id, target_id, rel_type)`, `records(lc_001, hub_id, lcc_class, title, creator)`,
     `coverage(lcc_class, records, high, medium, low)`.
   </script>
