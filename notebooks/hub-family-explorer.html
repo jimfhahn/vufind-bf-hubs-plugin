@@ -22,6 +22,15 @@
     // The Space is shown inside an iframe on huggingface.co and github.com refuses to be framed,
     // so every external link in the prose must open in a new tab.
     for (const a of document.querySelectorAll('a[href^="http"]')) { a.target = "_blank"; a.rel = "noopener"; }
+    // Pinned cells' source starts collapsed behind a "Show code" toggle.
+    for (const pre of document.querySelectorAll("main > .observablehq--cell + pre[data-language]")) {
+      const details = Object.assign(document.createElement("details"), {className: "cell-code"});
+      details.append(Object.assign(document.createElement("summary"), {textContent: "Show code"}));
+      pre.replaceWith(details);
+      details.append(pre);
+    }
+    document.head.append(Object.assign(document.createElement("style"), {textContent:
+      ".cell-code > summary { cursor: pointer; color: #888; font: 12px sans-serif; margin: 0.25rem 0; }"}));
   </script>
   <script id="2" type="module" pinned>
     // Load the two Parquet files into an in-browser DuckDB (~97 MB on first load). We fetch the
@@ -98,6 +107,16 @@
     const EXPRESSION_EDGES = new Set(["translationof", "arrangementof"]);
     const SERIES_EDGES = new Set(["inseries", "containedin", "containerof", "contains", "subseriesof", "seriescontainerof", "issuedas"]);
     const hubUrl = (id) => `https://id.loc.gov/resources/hubs/${id}`;
+    // Authorized label of any Hub, from id.loc.gov's X-PrefLabel header (CORS-enabled); null if unknown.
+    const lcLabel = async (id) => {
+      try {
+        const res = await fetch(`${hubUrl(id)}.json`, {method: "HEAD"});
+        const label = res.ok && res.headers.get("X-PrefLabel-Encoded");
+        return label ? decodeURIComponent(label) : null;
+      } catch {
+        return null;
+      }
+    };
     // "1001 $aAusten, Jane,$d1775-1817.$tPride and prejudice" → "Austen, Jane"; 130 headings have no $a name.
     const authorOf = (marcKey) => {
       if (!marcKey || !/^[17]/.test(marcKey)) return null;
@@ -118,23 +137,30 @@
     climb in step 2.
   </script>
   <script id="5" type="module" pinned>
-    // Deep link: ?hub=<uuid> opens straight on that Hub (used by the VuFind plugin sidebar).
+    // Deep link: ?hub=<uuid> opens straight on that Hub (used by the VuFind plugin sidebar and the
+    // collocation page). Its title prefills the search so the Hub menu shows what was opened.
     const hubParam = new URLSearchParams(location.search).get("hub");
-    const q = view(Inputs.text({label: "Search", placeholder: "title or author…", value: hubParam ? "" : "Pride and prejudice", submit: true}));
+    const linked = hubParam ? await db.queryRow(`SELECT title FROM hubs WHERE hub_id = ?`, [hubParam]) : null;
+    const q = view(Inputs.text({label: "Search", placeholder: "title or author…", value: hubParam ? (linked?.title ?? "") : "Pride and prejudice", submit: true}));
   </script>
   <script id="6" type="module">
-    const candidates = q.trim().length < 3 ? [] : rows(await db.query(
-      `SELECT h.hub_id, h.title, h.marc_key, h.media, coalesce(d.n, 0) AS degree
-       FROM hubs h LEFT JOIN deg d ON d.id = h.hub_id
-       WHERE h.title ILIKE ? OR h.marc_key ILIKE ?
-       ORDER BY degree DESC, h.title LIMIT 40`,
-      [`%${q.trim()}%`, `%${q.trim()}%`]
+    const SEARCH = `SELECT h.hub_id, h.title, h.marc_key, h.media, coalesce(d.n, 0) AS degree
+                    FROM hubs h LEFT JOIN deg d ON d.id = h.hub_id`;
+    const term = q.trim();
+    const candidates = term.length < 3 ? [] : rows(await db.query(
+      `${SEARCH} WHERE h.title ILIKE ? OR h.marc_key ILIKE ? ORDER BY degree DESC, h.title LIMIT 40`,
+      [`%${term}%`, `%${term}%`]
     ));
+    // Keep the deep-linked Hub in the menu even when better-connected namesakes outrank it.
+    const showLinked = linked != null && q === linked.title;
+    if (showLinked && !candidates.some((d) => d.hub_id === hubParam)) {
+      candidates.unshift(...rows(await db.query(`${SEARCH} WHERE h.hub_id = ?`, [hubParam])));
+    }
   </script>
   <script id="7" type="module" pinned>
     const chosen = view(Inputs.select(candidates, {
       label: "Hub",
-      value: candidates[0],
+      value: (showLinked && candidates.find((d) => d.hub_id === hubParam)) || candidates[0],
       format: (d) => `${d.title}  ·  ${d.marc_key ?? "—"}  ·  ${d.degree} links`
     }));
   </script>
@@ -164,21 +190,33 @@
       const seen = new Set([cur]);
       for (let i = 0; i < 8; i++) {
         const row = await db.queryRow(
+          // ~600 Hubs have two parents (e.g. a translation of both the work and an arrangement of
+          // it); take the better-connected one, which is usually the work itself.
           `SELECT r.target_id, r.rel_type, h.title FROM rels r JOIN hubs h ON h.hub_id = r.target_id
-           WHERE r.source_id = ? AND r.rel_type IN ('translationof', 'arrangementof') LIMIT 1`, [cur]);
+           LEFT JOIN deg d ON d.id = r.target_id
+           WHERE r.source_id = ? AND r.rel_type IN ('translationof', 'arrangementof')
+           ORDER BY coalesce(d.n, 0) DESC, r.target_id LIMIT 1`, [cur]);
         if (!row || seen.has(row.target_id)) break;
         path.push({from: cur, to: row.target_id, rel: row.rel_type, toTitle: row.title});
         cur = row.target_id;
         seen.add(cur);
       }
-      const root = rows(await db.query(`SELECT * FROM hubs WHERE hub_id = ?`, [cur]))[0];
-      return {rootId: cur, root, path, entered: focusId};
+      const root = rows(await db.query(`SELECT * FROM hubs WHERE hub_id = ?`, [cur]))[0]
+        // Hubs with no Hub-to-Hub relations are not in hubs_connected.parquet (e.g. many of the
+        // collocation page's links); stand in a bare root labelled from id.loc.gov.
+        ?? {hub_id: cur, title: await lcLabel(cur), marc_key: null, media: [], agents: [], isolated: true};
+      const enteredTitle = path.length ? (await db.queryRow(`SELECT title FROM hubs WHERE hub_id = ?`, [focusId]))?.title : root.title;
+      return {rootId: cur, root, path, entered: focusId, enteredTitle};
     })();
   </script>
   <script id="12" type="module">
     if (!climb) display(html`<p><i>No Hub selected. Search above.</i>`);
-    else if (climb.path.length === 0) display(html`<p><b>${climb.root.title}</b> <small>(${climb.root.marc_key ?? ""})</small> is already the family root, so there is nothing to climb. <a href=${hubUrl(climb.rootId)} target="_blank">View on id.loc.gov ↗</a>`);
-    else display(html`<p>Started at <b>${chosen?.title ?? climb.entered}</b>${climb.path.map((p) => html` → <small>${p.rel}</small> → <b>${p.toTitle}</b>`)}.<br>Family root: <a href=${hubUrl(climb.rootId)} target="_blank">${climb.root.title} ↗</a> <small>(${climb.root.marc_key ?? ""})</small>`);
+    else if (climb.root.isolated) display(html`<p>${climb.root.title ? html`<b>${climb.root.title}</b>` : html`Hub <code>${climb.rootId}</code>`} is not linked to any other Hub in the LC data, so it has no family to draw. <a href=${hubUrl(climb.rootId)} target="_blank">View on id.loc.gov ↗</a>`);
+    else if (climb.path.length === 0) {
+      const expressions = family.filter((d) => d.group === "Expressions").length;
+      display(html`<p><b>${climb.root.title}</b> <small>(${climb.root.marc_key ?? ""})</small> is already the family root, so there is nothing to climb. <a href=${hubUrl(climb.rootId)} target="_blank">View on id.loc.gov ↗</a>${expressions ? html`<br><small>To see a climb, open <b>Expressions (${expressions})</b> in step 3 and click a translation or arrangement: it becomes the starting point and the page climbs from it back up to this work.</small>` : ""}`);
+    }
+    else display(html`<p>Started at <b>${climb.enteredTitle ?? climb.entered}</b>${climb.path.map((p) => html` → <small>${p.rel}</small> → <b>${p.toTitle}</b>`)}.<br>Family root: <a href=${hubUrl(climb.rootId)} target="_blank">${climb.root.title} ↗</a> <small>(${climb.root.marc_key ?? ""})</small>`);
   </script>
   <script id="13" type="module">
     // One row per family member: every Hub one hop from the root, in either direction,
@@ -219,7 +257,8 @@
     - **Derivative works**: adaptations, sequels, parodies, films, operas. The interesting part;
       open by default and colored by how surprising the relationship is (red = most surprising).
     - **Expressions**: translations and arrangements. Predictable, so collapsed by default
-      (opened automatically if that is where you started).
+      (opened automatically if that is where you started). Click one to climb from it back to the
+      root (step 2).
     - **Series & parts**: whole/part, series, continuations, revisions.
     - **Other related**: links with no specific type.
 
@@ -230,7 +269,7 @@
   </script>
   <script id="15" type="module" pinned>
     const shown = view(Inputs.checkbox(["Derivative works", "Expressions", "Series & parts", "Other related"], {
-      label: "Show", value: ["Derivative works", "Series & parts", "Other related"]
+      label: "Show", value: ["Derivative works", "Expressions", "Series & parts", "Other related"]
     }));
     const layout = view(Inputs.radio(["Indented tree", "Tidy tree"], {label: "Layout", value: "Indented tree"}));
   </script>
@@ -250,7 +289,7 @@
     // they can see where they started relative to the rest of the family.
     const enteredBelowRoot = climb && climb.entered !== climb.rootId;
     const shownGroups = enteredBelowRoot ? [...new Set([...shown, "Expressions"])] : shown;
-    const treeData = climb && {
+    const treeData = climb && !climb.root.isolated && {
       name: climb.root.title, hub_id: climb.rootId, root: true,
       children: groupOrder
         .filter((g) => shownGroups.includes(g))
@@ -312,7 +351,10 @@
       display(html`<div style="overflow-x:auto"><table style="border-collapse:collapse;font:13px sans-serif;min-width:100%">${head}${rootRow}${body}</table></div>`);
     }
     else {
-      const root = d3.hierarchy(treeData);
+      // As in the indented tree, Expressions fold to one node unless you entered through one.
+      const root = d3.hierarchy({...treeData, children: treeData.children.map((g) =>
+        g.name === "Expressions" && !g.children.some((d) => d.hub_id === climb.entered)
+          ? {name: `${g.name} (${g.children.length}, switch to the indented tree to list them)`} : g)});
       // Fixed column spacing; the SVG grows to fit and scrolls horizontally on narrow screens.
       const left = 24, right = 440, dx = 16, dy = 200;
       d3.tree().nodeSize([dx, dy])(root);
@@ -343,7 +385,7 @@
         .attr("x", (d) => d.data.root ? -6 : d.children ? -10 : 8)
         .attr("text-anchor", (d) => d.data.root ? "start" : d.children ? "end" : "start")
         .attr("font-weight", (d) => d.data.root || !d.data.hub_id || d.data.hub_id === climb.entered ? "bold" : "normal")
-        .text((d) => d.data.root ? d.data.name : d.data.hub_id ? label(d.data) : `${d.data.name} (${d.children.length})`)
+        .text((d) => d.data.root ? d.data.name : d.data.hub_id ? label(d.data) : d.children ? `${d.data.name} (${d.children.length})` : d.data.name)
         .attr("fill", (d) => d.data.hub_id ? "currentColor" : "#555")
         .style("cursor", (d) => d.data.hub_id && !d.data.root ? "pointer" : null)
         .on("click", (e, d) => d.data.hub_id && !d.data.root && onClick(e, d.data));

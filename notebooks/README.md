@@ -26,7 +26,10 @@ are copied verbatim from
 
 **Deep link:** `?hub=<uuid>` opens directly on that Hub, e.g.
 `hub-family-explorer?hub=013dc21c-e732-e589-24fe-bcc876264d3a`
-(*Pride and prejudice*). The URL is kept in sync as you re-root.
+(*Pride and prejudice*). The URL is kept in sync as you re-root. The linked
+Hub is preselected in the search menu; a Hub with no Hub-to-Hub relations
+(not in `hubs_connected.parquet`, e.g. many single-Hub links from the
+collocation page) is reported by its id.loc.gov label instead of a family.
 
 Design draws on Arastoopoor (2022, *LHT* 40:1): top-down vs. bottom-up
 navigation of bibliographic families; Pauman Budanović & Žumer (2021,
