@@ -11,8 +11,13 @@ record sits on one shelf; its Hub's typed relationships reach records on
 other shelves. With this table, Sacks's *The man who mistook his wife for
 a hat* (6 records, class R) is one hop from Nyman's opera of it (class M),
 Chernow's *Alexander Hamilton* (E) from Miranda's *Hamilton* (M), and
-Landon's *Anna and the King of Siam* (D) from *The King and I* (M). No
-call number, subject heading or shelf browse connects those pairs. The
+Landon's *Anna and the King of Siam* (D) from *The King and I* (M).
+Subject headings rarely bridge such pairs: across the 40 cross-shelf
+pairs, the two sides share an identical LCSH heading in 3 and a main
+heading (usually a person or character both works are about) in 14. In
+28 pairs a record on one side already names the other work in a
+name/title added entry, but only one-way and only on that record
+(`lcsh_overlap.py`). The
 [collocation page](https://huggingface.co/spaces/jimfhahn/bibframe-hub-collocation)
 (`notebooks/hub-collocation.html`) charts all of them.
 
@@ -22,6 +27,7 @@ call number, subject heading or shelf browse connects those pairs. The
 ../hf-dataset/.venv/bin/python build_bib_to_hub.py            # → out/bib_to_hub.parquet (~2 min)
 ../hf-dataset/.venv/bin/python build_bib_to_hub.py --stats    # + coverage and collocation numbers
 ../hf-dataset/.venv/bin/python build_bib_to_hub.py --collocation out/collocation   # + notebook files
+../hf-dataset/.venv/bin/python lcsh_overlap.py --verbose      # do LCSH / added entries already link the cross-shelf pairs? (fetches MARC from id.loc.gov)
 ```
 
 Reads `hubs.parquet` and `relations.parquet` from `../hf-dataset/out/` if

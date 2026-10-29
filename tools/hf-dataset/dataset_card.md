@@ -72,8 +72,13 @@ case study wherever each one is classed.
 | Cellini, *Vita* — 4 records in **N** (art) | opera adaptation | Berlioz, *Benvenuto Cellini* — 4 records in **M** |
 | Herriman, *Krazy Kat* — 2 records in **N** | based on | Carpenter's *Krazy Kat* ballet — **M** |
 
-No call number, subject heading or shelf browse connects these pairs;
-the Hub graph does, and `bib_to_hub` ties both ends to real records
+Classification puts each pair on different shelves. Subject headings
+rarely rejoin them: across all 40 cross-class pairs, the two sides share
+an identical LCSH heading in 3 and a main heading (usually a person or
+character, e.g. *Hamilton, Alexander*, *Cellini, Benvenuto*) in 14. Some
+records already name the related work in a name/title added entry (28 of
+40 pairs), but only one-way and only on that record. The Hub graph links
+the works themselves, and `bib_to_hub` ties both ends to real records
 (`https://id.loc.gov/resources/works/{lc_001}`). At high confidence,
 304K Hubs gather records, 69K of them gather two or more (up to 176 on
 one Hub), 2,303 gather records from two or more LC classes, and 298
